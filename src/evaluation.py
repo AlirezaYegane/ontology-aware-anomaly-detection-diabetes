@@ -213,3 +213,102 @@ def save_metrics_summary(metrics_list: List[Dict[str, float]], output_path: str,
         print(f"Metrics saved to: {output_path}")
     else:
         raise ValueError(f"Unsupported format: {format}. Use 'csv' or 'json'.")
+def compute_classification_metrics(
+    y_true: np.ndarray,
+    anomaly_scores: np.ndarray,
+    model_name: str = "Model"
+) -> Dict[str, float]:
+    """
+    Wrapper used by run_pipeline_direct.py.
+
+    Computes ROC-AUC and PR-AUC and returns a metrics dict with:
+        - 'roc_auc'
+        - 'pr_auc'
+        - 'model_name'
+
+    Internally از evaluate_anomaly_detector استفاده می‌کند
+    تا رفتار در نوت‌بوک‌ها و اسکریپت یکی باشد.
+    """
+    return evaluate_anomaly_detector(
+        y_true=y_true,
+        anomaly_scores=anomaly_scores,
+        model_name=model_name,
+    )
+
+
+def plot_roc_pr_curves(
+    y_true: np.ndarray,
+    anomaly_scores: np.ndarray,
+    title: str = "Model",
+    save_path: Optional[str] = None,
+    show: bool = False,
+) -> None:
+    """
+    Plot ROC and Precision–Recall curves for a SINGLE model,
+    و نتیجه را اگر save_path داده شده باشد روی دیسک ذخیره می‌کند.
+
+    Parameters
+    ----------
+    y_true : np.ndarray
+        برچسب‌های باینری واقعی (0/1).
+    anomaly_scores : np.ndarray
+        نمره‌ی آنومالی، هرچه بیشتر = مشکوک‌تر.
+    title : str
+        عنوان نمودارها.
+    save_path : Optional[str]
+        مسیر ذخیره‌ی فایل PNG.
+    show : bool
+        اگر True باشد نمودار نمایش داده می‌شود، در غیر این صورت فقط ذخیره/بسته می‌شود.
+    """
+    # ROC
+    fpr, tpr, _ = roc_curve(y_true, anomaly_scores)
+    # PR
+    precision, recall, _ = precision_recall_curve(y_true, anomaly_scores)
+
+    roc_auc = roc_auc_score(y_true, anomaly_scores)
+    pr_auc = average_precision_score(y_true, anomaly_scores)
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    # --- ROC Curve ---
+    ax = axes[0]
+    ax.plot(fpr, tpr, linewidth=2)
+    ax.plot([0, 1], [0, 1], "k--", linewidth=1, alpha=0.3)
+    ax.set_xlabel("False Positive Rate")
+    ax.set_ylabel("True Positive Rate")
+    ax.set_title(f"ROC — {title} (AUC = {roc_auc:.3f})")
+    ax.grid(True, alpha=0.3)
+
+    # --- Precision–Recall Curve ---
+    ax = axes[1]
+    ax.plot(recall, precision, linewidth=2)
+    baseline = y_true.sum() / len(y_true) if len(y_true) > 0 else 0.0
+    ax.axhline(
+        y=baseline,
+        color="k",
+        linestyle="--",
+        linewidth=1,
+        alpha=0.3,
+        label=f"Baseline = {baseline:.3f}",
+    )
+    ax.set_xlabel("Recall")
+    ax.set_ylabel("Precision")
+    ax.set_title(f"Precision–Recall — {title} (AUC = {pr_auc:.3f})")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="best")
+
+    plt.tight_layout()
+
+    # ذخیره‌ی فایل اگر مسیر داده شده
+    if save_path is not None:
+        save_path = str(save_path)
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path, dpi=150)
+        print(f"Saved ROC/PR figure for '{title}' to: {save_path}")
+
+    # نمایش یا بستن شکل
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+

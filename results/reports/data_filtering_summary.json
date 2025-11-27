@@ -1,0 +1,66 @@
+{
+  "filtering_steps": [
+    {
+      "step_name": "load_raw_data",
+      "description": "Load raw dataset (101,766 rows \u00d7 50 columns)",
+      "n_before": 101766,
+      "n_after": 101766,
+      "n_removed": 0,
+      "pct_removed": 0.0
+    },
+    {
+      "step_name": "feature_selection",
+      "description": "Select 14 features (from 50 columns)",
+      "n_before": 101766,
+      "n_after": 101766,
+      "n_removed": 0,
+      "pct_removed": 0.0
+    },
+    {
+      "step_name": "replace_missing_markers",
+      "description": "Replace '?' with NaN (2,273 cells affected)",
+      "n_before": 101766,
+      "n_after": 101766,
+      "n_removed": 0,
+      "pct_removed": 0.0
+    },
+    {
+      "step_name": "drop_missing_values",
+      "description": "Drop rows with missing values in critical columns ['readmitted', 'race', 'gender', 'age', 'time_in_hospital', 'num_lab_procedures', 'num_medications', 'number_inpatient', 'number_emergency', 'change', 'diabetesMed'] (2,273 rows removed)",
+      "n_before": 101766,
+      "n_after": 99493,
+      "n_removed": 2273,
+      "pct_removed": 2.23
+    },
+    {
+      "step_name": "create_target",
+      "description": "Create binary target (readmitted <30 days)",
+      "n_before": 99493,
+      "n_after": 99493,
+      "n_removed": 0,
+      "pct_removed": 0.0
+    },
+    {
+      "step_name": "impute_missing_values",
+      "description": "Impute missing values (numerical: median, categorical: 'Unknown')",
+      "n_before": 99493,
+      "n_after": 99493,
+      "n_removed": 0,
+      "pct_removed": 0.0
+    },
+    {
+      "step_name": "encode_and_scale",
+      "description": "OneHotEncode + StandardScale (14 -> 30 features)",
+      "n_before": 99493,
+      "n_after": 99493,
+      "n_removed": 0,
+      "pct_removed": 0.0
+    }
+  ],
+  "class_balance": {
+    "total_samples": 99493,
+    "n_positive": 11169,
+    "n_negative": 88324,
+    "positive_ratio": 11.23
+  }
+}

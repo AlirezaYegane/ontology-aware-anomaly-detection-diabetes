@@ -8,16 +8,19 @@ on the Diabetes 130-US Hospitals dataset.
 __version__ = "0.1.0"
 __author__ = "Your Name"
 
-from .data_loader import load_raw_data, load_processed_data
-from .preprocessing import preprocess_data, extract_features
-from .anomaly_detection import detect_anomalies
-from .ontology_rules import validate_with_ontology
+from .preprocessing import load_raw_data, build_feature_matrix, train_test_split_stratified
+from .models import IsolationForestDetector, AutoencoderDetector
+from .ontology import compute_ontology_penalty, combine_scores
+from .evaluation import compute_classification_metrics, plot_roc_pr_curves
 
 __all__ = [
     "load_raw_data",
-    "load_processed_data",
-    "preprocess_data",
-    "extract_features",
-    "detect_anomalies",
-    "validate_with_ontology",
+    "build_feature_matrix",
+    "train_test_split_stratified",
+    "IsolationForestDetector",
+    "AutoencoderDetector",
+    "compute_ontology_penalty",
+    "combine_scores",
+    "compute_classification_metrics",
+    "plot_roc_pr_curves",
 ]
