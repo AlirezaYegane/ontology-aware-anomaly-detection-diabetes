@@ -1,112 +1,159 @@
-# Ontology-aware Anomaly Detection Toy Pipeline
+# Ontology-Aware Anomaly Detection for Diabetes Hospital Readmissions
 
-## Abstract
-This project implements an anomaly detection pipeline to identify early hospital readmissions (<30 days) using the Diabetes 130-US Hospitals dataset. It explores a hybrid approach that combines unsupervised machine learning models (IsolationForest and Autoencoders) with an ontology-inspired rule layer. This "ontology layer" penalizes clinically high-risk patterns—such as poor glycemic control or medication mismanagement—to refine the statistical anomaly scores, aiming to improve detection of preventable readmissions.
+A professional machine learning pipeline combining **anomaly detection** (Isolation Forest & Autoencoder) with **domain-knowledge ontology rules** to identify high-risk early hospital readmissions in diabetes patients.
 
-## Dataset
-**Diabetes 130-US Hospitals for years 1999–2008**  
-This dataset represents 10 years (1999-2008) of clinical care at 130 US hospitals and integrated delivery networks. It includes over 50 features representing patient and hospital outcomes.
+## 📊 Dataset
 
-- **Source**: [UCI Machine Learning Repository](https://archive.ics.uci.edu/dataset/296/diabetes+130-us+hospitals+for+years+1999-2008)
-- **Target**: Early readmission (`<30` days).
-- **Key Features**: Demographics, laboratory tests (A1C, glucose), medication administration, and hospital stay metrics.
+**Diabetes 130-US Hospitals for Years 1999-2008**
+- **Source**: UCI Machine Learning Repository
+- **Size**: 101,766 hospital encounters
+- **Task**: Binary classification (readmitted <30 days vs not)
+- **Features**: Demographics, hospital stay metrics, lab results, medication changes
 
-## Method Overview
-
-### 1. Baseline 1: IsolationForest
-We use the standard **IsolationForest** algorithm (via scikit-learn) as a baseline unsupervised anomaly detector. It isolates observations by randomly selecting a feature and then randomly selecting a split value between the maximum and minimum values of the selected feature. Anomalies are susceptible to isolation and thus have shorter path lengths in the trees.
-
-### 2. Baseline 2: Autoencoder
-A feedforward **Autoencoder** is implemented using PyTorch.
-- **Architecture**: Encoder compresses the input into a lower-dimensional bottleneck (latent space), and the Decoder attempts to reconstruct the original input.
-- **Training**: The model is trained **only on normal samples** (non-readmitted patients).
-- **Anomaly Score**: The reconstruction error (Mean Squared Error) between the input and the output. High error indicates the sample deviates from the "normal" patterns learned during training.
-
-### 3. Ontology-Inspired Rule Layer
-To bridge the gap between statistical anomalies and clinical risk, we introduce a rule-based penalty term derived from domain knowledge.
-
-**Key Rules:**
-1.  **Poor Glycemic Control**: High A1C (>7 or >8) + No change in medication + Currently on diabetes meds. (Suggests treatment inertia).
-2.  **Severe Hyperglycemia**: Very high glucose (>200 or >300) + Low number of lab procedures. (Suggests insufficient monitoring).
-3.  **Complex Case / Short Stay**: High medication burden (>20 meds) + Very short hospital stay (<3 days). (Suggests premature discharge).
-
-**Combined Score:**
-The final anomaly score ($S_{det}$) is a weighted combination of the model's statistical score ($S_{gen}$) and the ontology penalty ($S_{ont}$):
-
-$$ S_{det} = \alpha \cdot S_{gen} + \beta \cdot S_{ont} $$
-
-(e.g., $\alpha=0.7, \beta=0.3$)
-
-## Project Structure
+## 🏗️ Project Structure
 
 ```
 ontology-aware-anomaly-detection-diabetes/
 ├── data/
-│   ├── raw/                # Original dataset
-│   └── processed/          # Cleaned/Feature-engineered data
-├── notebooks/
-│   ├── 01_eda.ipynb        # Exploratory Data Analysis
-│   ├── 02_baseline_if.ipynb # Isolation Forest Baseline
-│   ├── 03_autoencoder.ipynb # Autoencoder Model
-│   └── 04_ontology_eval.ipynb # Ontology Rules & Evaluation
-├── src/
-│   ├── preprocessing.py    # Data loading & cleaning functions
-│   ├── models.py           # IsolationForest & Autoencoder classes
-│   ├── ontology.py         # Ontology rule definitions
-│   └── evaluation.py       # Metrics & plotting helpers
-├── results/
-├── tests/
-├── README.md
-└── requirements.txt
+│   ├── raw/                   # diabetic_data.csv, IDS_mapping.csv
+│   └── processed/             # Preprocessed outputs (generated)
+├── notebooks/                 # 4 executable Jupyter notebooks
+│   ├── 01_eda.ipynb          # Exploratory Data Analysis
+│   ├── 02_baseline_if.ipynb  # Isolation Forest baseline
+│   ├── 03_autoencoder.ipynb  # PyTorch Autoencoder
+│   └── 04_ontology_eval.ipynb # Ontology-enhanced evaluation
+├── results/                   # Output plots and metrics (generated)
+├── src/                       # Core Python modules
+│   ├── __init__.py
+│   ├── preprocessing.py       # Data loading, cleaning, feature engineering
+│   ├── models.py              # Isolation Forest & Autoencoder models
+│   ├── ontology.py            # Clinical rule-based penalty layer
+│   └── evaluation.py          # Metrics, ROC/PR curves, visualization
+├── archive/                   # Legacy code and documentation
+├── TASKS.md                   # Project task checklist
+├── requirements.txt           # Python dependencies
+└── README.md                  # This file
 ```
 
-## How to Run
+## 🚀 Quick Start
 
-### Prerequisites
+### Option 1: Run Locally
+
+1. **Clone the repository**
+   ```bash
+   git clone <your-repo-url>
+   cd ontology-aware-anomaly-detection-diabetes
+   ```
+
+2. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Place data files** (if not already present)
+   - Download `diabetic_data.csv` and place it in `data/raw/`
+
+4. **Run notebooks in order**
+   ```bash
+   jupyter notebook
+   ```
+   - Execute `01_eda.ipynb` → `02_baseline_if.ipynb` → `03_autoencoder.ipynb` → `04_ontology_eval.ipynb`
+
+### Option 2: Run on Google Colab
+
+1. **Upload the project folder** to your Google Drive
+
+2. **Open any notebook** in Google Colab (e.g., `notebooks/01_eda.ipynb`)
+
+3. **Mount Google Drive** and navigate to project directory:
+   ```python
+   from google.colab import drive
+   drive.mount('/content/drive')
+   %cd /content/drive/MyDrive/ontology-aware-anomaly-detection-diabetes
+   ```
+
+4. **Run the notebooks**  
+   ✅ The first cell in each notebook contains a path fix for Colab compatibility:
+   ```python
+   import sys, os
+   sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '..')))
+   ```
+
+## 📓 Notebook Workflow
+
+| Notebook | Purpose | Key Outputs |
+|----------|---------|-------------|
+| **01_eda.ipynb** | Explore data distributions, correlations, missing values | Visualizations, data insights |
+| **02_baseline_if.ipynb** | Train Isolation Forest, evaluate baseline performance | ROC/PR curves, metrics CSV |
+| **03_autoencoder.ipynb** | Train PyTorch Autoencoder, compute reconstruction errors | Training loss plot, ROC/PR curves |
+| **04_ontology_eval.ipynb** | Apply ontology rules, compare ML vs ML+Ontology | Comparison table, combined metrics |
+
+## 🧬 Methodology
+
+### 1. Anomaly Detection Models
+- **Isolation Forest**: Unsupervised tree-based anomaly detector
+- **Feedforward Autoencoder**: Neural network trained on normal samples (PyTorch)
+
+### 2. Ontology-Inspired Rules
+Clinical domain knowledge encoded as penalty scores:
+
+| Rule | Condition | Penalty |
+|------|-----------|---------|
+| **High Risk** | Poor glycemic control (A1C>7/8) + No med change + On diabetes meds | 0.9 |
+| **High Risk** | Very high glucose (>200/300) + Insufficient lab procedures (<40) | 0.85 |
+| **Medium Risk** | High medication burden (>20) + Short stay (<3 days) | 0.6 |
+| **Low Risk** | None of the above | 0.1 |
+
+### 3. Score Combination
+```
+Final Score = α × Normalized(ML_Score) + β × Ontology_Penalty
+```
+Default: α=0.7 (ML weight), β=0.3 (Ontology weight)
+
+## 📈 Expected Results
+
+Results are saved to `results/` directory:
+- `if_roc_pr_curves.png` - Isolation Forest performance
+- `autoencoder_roc_pr_curves.png` - Autoencoder performance  
+- `ontology_comparison_curves.png` - ML vs ML+Ontology comparison
+- `*.csv` - Metrics summaries (ROC-AUC, PR-AUC)
+
+**Performance Metrics**:
+- **ROC-AUC**: Area under ROC curve (higher is better)
+- **PR-AUC**: Precision-Recall AUC (important for imbalanced data)
+
+## 🛠️ Requirements
+
 - Python 3.8+
-- Install dependencies:
-  ```bash
-  pip install -r requirements.txt
-  ```
+- PyTorch 2.0+
+- scikit-learn 1.3+
+- pandas, numpy, matplotlib, seaborn
+- Jupyter Notebook
 
-### Step-by-Step
+See `requirements.txt` for full list.
 
-1.  **Download Data**:
-    - Download `diabetic_data.csv` from the [UCI Repository](https://archive.ics.uci.edu/dataset/296/diabetes+130-us+hospitals+for+years+1999-2008).
-    - Place the file in the `data/` directory: `data/diabetic_data.csv`.
+## 📚 References
 
-2.  **Run Notebooks**:
-    - Start Jupyter Lab or Notebook:
-      ```bash
-      jupyter lab
-      ```
-    - Open the notebooks in `notebooks/` in order:
-        1.  `01_eda.ipynb`: Explore the data.
-        2.  `02_baseline_if.ipynb`: Train and evaluate Isolation Forest.
-        3.  `03_autoencoder.ipynb`: Train and evaluate Autoencoder.
-        4.  `04_ontology_eval.ipynb`: Apply ontology rules and compare results.
+- **Dataset**: Beata Strack et al., "Impact of HbA1c Measurement on Hospital Readmission Rates: Analysis of 70,000 Clinical Database Patient Records", BioMed Research International, 2014.
+- **Isolation Forest**: Liu et al., "Isolation Forest", ICDM 2008
+- **Autoencoders for Anomaly Detection**: Sakurada & Yairi, "Anomaly Detection Using Autoencoders with Nonlinear Dimensionality Reduction", MLSDA Workshop 2014
 
-3.  **Using the Source Code**:
-    - The core logic is available in the `src/` package. You can import these modules in your own scripts:
-      ```python
-      from src.preprocessing import load_data, clean_data
-      from src.models import train_autoencoder
-      ```
+## 🎯 Future Work
 
-## Results
+- Explore additional autoencoder architectures (VAE, LSTM-AE)
+- Tune ontology rule weights with expert feedback
+- Add more clinical rules based on domain expertise
+- Deploy as web service for real-time risk prediction
+- Validate on external healthcare datasets
 
-| Model                           | ROC-AUC | PR-AUC | Notes                            |
-|---------------------------------|--------:|-------:|----------------------------------|
-| IsolationForest                 |   0.XX  |  0.XX  | Baseline unsupervised detector   |
-| Autoencoder                     |   0.XX  |  0.XX  | Reconstruction-based baseline    |
-| IF + ontology-inspired penalty  |   0.XX  |  0.XX  | Combined statistical + rule term |
-| AE + ontology-inspired penalty  |   0.XX  |  0.XX  | Combined reconstruction + rules  |
+## 📄 License
 
-(You can leave placeholder `0.XX` values where I will later fill in real numbers.)
+This project is for educational and research purposes.
 
-## Future Work
+## 👤 Author
 
-- **Medical Ontologies**: Using real medical ontologies (**SNOMED CT**, **RxNorm**, **DOID**, **HPO**) for more robust rule generation.
-- **Graph Representations**: Applying graph-based representations instead of simple rules.
-- **Sequence Models**: Using sequence models (e.g. **GRU**/**LSTM**) over patient trajectories.
-- **Generative Explanations**: Integrating diffusion-based generative models for counterfactual explanations.
+Created as a demonstration of combining machine learning with domain knowledge for healthcare anomaly detection.
+
+---
+
+**Note**: This project is GitHub-ready and optimized for Google Colab execution. All notebooks include path fixes for seamless imports from `src/` modules.

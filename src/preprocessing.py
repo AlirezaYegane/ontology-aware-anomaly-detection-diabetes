@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
+from sklearn.model_selection import train_test_split
 import pickle
 from pathlib import Path
 from typing import Tuple, List, Optional
@@ -13,6 +14,19 @@ from typing import Tuple, List, Optional
 def load_data(filepath: str) -> pd.DataFrame:
     """Load the dataset from a CSV file."""
     return pd.read_csv(filepath)
+
+def load_raw_data(filepath: str) -> pd.DataFrame:
+    """
+    Load the raw dataset from a CSV file.
+    Alias for load_data() - specification-compliant name.
+    
+    Args:
+        filepath: Path to the CSV file
+        
+    Returns:
+        DataFrame containing the raw data
+    """
+    return load_data(filepath)
 
 def get_selected_features() -> List[str]:
     """Return the list of features selected for the model."""
@@ -106,6 +120,64 @@ def fit_transform_data(X: pd.DataFrame) -> Tuple[pd.DataFrame, ColumnTransformer
     )
     
     return X_final, preprocessor
+
+def build_feature_matrix(filepath: str, save_preprocessor: bool = False, 
+                        output_dir: Optional[Path] = None) -> Tuple[pd.DataFrame, pd.Series, Optional[ColumnTransformer]]:
+    """
+    Complete preprocessing pipeline: load, clean, transform data.
+    Specification-compliant function that consolidates the full workflow.
+    
+    Args:
+        filepath: Path to raw CSV data
+        save_preprocessor: Whether to save the preprocessor to disk
+        output_dir: Directory to save preprocessor (if save_preprocessor=True)
+        
+    Returns:
+        X: Transformed feature matrix (DataFrame)
+        y: Binary target variable (1 = readmitted <30 days, 0 = otherwise)
+        preprocessor: Fitted ColumnTransformer (or None if not saved)
+    """
+    # Step 1: Load data
+    df = load_raw_data(filepath)
+    
+    # Step 2: Get selected features
+    selected_features = get_selected_features()
+    
+    # Step 3: Clean data
+    df_clean = clean_data(df, selected_features)
+    
+    # Step 4: Create target variable
+    X, y = create_target(df_clean)
+    
+    # Step 5: Fit and transform features
+    X_transformed, preprocessor = fit_transform_data(X)
+    
+    # Step 6: Optionally save preprocessor
+    if save_preprocessor and output_dir is not None:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        with open(output_dir / 'preprocessor.pkl', 'wb') as f:
+            pickle.dump(preprocessor, f)
+    
+    return X_transformed, y, preprocessor
+
+def train_test_split_stratified(X: pd.DataFrame, y: pd.Series, 
+                                test_size: float = 0.2, 
+                                random_state: int = 42) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
+    """
+    Perform stratified train-test split.
+    Specification-compliant function for splitting data.
+    
+    Args:
+        X: Feature matrix
+        y: Target variable
+        test_size: Proportion of data for test set (default: 0.2)
+        random_state: Random seed for reproducibility
+        
+    Returns:
+        X_train, X_test, y_train, y_test
+    """
+    return train_test_split(X, y, test_size=test_size, stratify=y, random_state=random_state)
 
 def save_processed_data(X: pd.DataFrame, y: pd.Series, preprocessor: ColumnTransformer, output_dir: Path):
     """Save the processed data and preprocessor to disk."""

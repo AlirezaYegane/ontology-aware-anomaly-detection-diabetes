@@ -101,6 +101,20 @@ def train_autoencoder(X_train_normal: np.ndarray, input_dim: int, bottleneck_dim
     
     return model, train_losses
 
+def build_autoencoder(input_dim: int, bottleneck_dim: int = 32) -> nn.Module:
+    """
+    Build and return an untrained autoencoder model.
+    Specification-compliant helper function.
+    
+    Args:
+        input_dim: Number of input features
+        bottleneck_dim: Size of the bottleneck layer
+        
+    Returns:
+        Untrained FeedforwardAutoencoder model
+    """
+    return FeedforwardAutoencoder(input_dim, bottleneck_dim)
+
 def compute_reconstruction_error(model: nn.Module, X: np.ndarray, device: str = 'cpu', batch_size: int = 1024) -> np.ndarray:
     """
     Compute reconstruction error for all samples in X.
@@ -124,6 +138,13 @@ def compute_reconstruction_error(model: nn.Module, X: np.ndarray, device: str = 
     
     return np.array(reconstruction_errors)
 
+def reconstruction_error(model: nn.Module, X: np.ndarray, device: str = 'cpu', batch_size: int = 1024) -> np.ndarray:
+    """
+    Compute reconstruction error for all samples.
+    Alias for compute_reconstruction_error() - specification-compliant name.
+    """
+    return compute_reconstruction_error(model, X, device, batch_size)
+
 # ============================================================================
 # Isolation Forest
 # ============================================================================
@@ -145,3 +166,18 @@ def get_if_anomaly_scores(model: IsolationForest, X: np.ndarray) -> np.ndarray:
     Get anomaly scores from Isolation Forest (negated so higher = more anomalous).
     """
     return -model.score_samples(X)
+
+# Specification-compliant aliases
+def fit_isolation_forest(X_train: np.ndarray, contamination: float = 0.1, random_state: int = 42) -> IsolationForest:
+    """
+    Train Isolation Forest model.
+    Alias for train_isolation_forest() - specification-compliant name.
+    """
+    return train_isolation_forest(X_train, contamination, random_state)
+
+def score_isolation_forest(model: IsolationForest, X: np.ndarray) -> np.ndarray:
+    """
+    Get anomaly scores from Isolation Forest.
+    Alias for get_if_anomaly_scores() - specification-compliant name.
+    """
+    return get_if_anomaly_scores(model, X)

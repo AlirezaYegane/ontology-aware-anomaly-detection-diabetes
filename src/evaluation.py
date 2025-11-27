@@ -3,6 +3,7 @@ Evaluation module for Anomaly Detection models.
 """
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.metrics import (
     roc_auc_score, 
@@ -13,6 +14,8 @@ from sklearn.metrics import (
     recall_score
 )
 from typing import Dict, List, Optional
+import json
+from pathlib import Path
 
 def evaluate_anomaly_detector(y_true: np.ndarray, anomaly_scores: np.ndarray, model_name: str = "Model") -> Dict[str, float]:
     """
@@ -57,6 +60,54 @@ def evaluate_anomaly_detector(y_true: np.ndarray, anomaly_scores: np.ndarray, mo
         'pr_auc': pr_auc,
         'model_name': model_name
     }
+
+def compute_roc_pr(y_true: np.ndarray, anomaly_scores: np.ndarray) -> Dict[str, float]:
+    """
+    Compute ROC-AUC and PR-AUC metrics.
+    Specification-compliant function for metric computation.
+    
+    Args:
+        y_true: True labels
+        anomaly_scores: Anomaly scores from model
+        
+    Returns:
+        Dictionary with 'roc_auc' and 'pr_auc' keys
+    """
+    roc_auc = roc_auc_score(y_true, anomaly_scores)
+    pr_auc = average_precision_score(y_true, anomaly_scores)
+    return {'roc_auc': roc_auc, 'pr_auc': pr_auc}
+
+def summarize_at_thresholds(y_true: np.ndarray, anomaly_scores: np.ndarray, 
+                            percentiles: List[int] = [90, 95, 99]) -> List[Dict[str, float]]:
+    """
+    Summarize performance at different threshold percentiles.
+    Specification-compliant function for threshold analysis.
+    
+    Args:
+        y_true: True labels
+        anomaly_scores: Anomaly scores from model
+        percentiles: List of percentile values to evaluate
+        
+    Returns:
+        List of dictionaries containing threshold metrics
+    """
+    results = []
+    for percentile in percentiles:
+        threshold = np.percentile(anomaly_scores, percentile)
+        y_pred = (anomaly_scores >= threshold).astype(int)
+        precision = precision_score(y_true, y_pred, zero_division=0)
+        recall = recall_score(y_true, y_pred, zero_division=0)
+        flagged_pct = (y_pred.sum() / len(y_pred)) * 100
+        
+        results.append({
+            'percentile': percentile,
+            'threshold': threshold,
+            'precision': precision,
+            'recall': recall,
+            'flagged_pct': flagged_pct
+        })
+    
+    return results
 
 def plot_evaluation_curves(y_test: np.ndarray, model_scores: Dict[str, np.ndarray]):
     """
@@ -129,3 +180,36 @@ def print_comparison_table(metrics_list: List[Dict[str, float]]):
         print(f"{model_name:<25} {roc_auc:<15.4f} {pr_auc:<15.4f}")
     
     print(f"{'='*60}\n")
+
+def plot_roc_pr(y_test: np.ndarray, model_scores: Dict[str, np.ndarray]):
+    """
+    Plot ROC and PR curves for multiple models.
+    Alias for plot_evaluation_curves() - specification-compliant name.
+    """
+    return plot_evaluation_curves(y_test, model_scores)
+
+def save_metrics_summary(metrics_list: List[Dict[str, float]], output_path: str, format: str = 'csv'):
+    """
+    Save model comparison metrics to a file.
+    Specification-compliant function for exporting results.
+    
+    Args:
+        metrics_list: List of metric dictionaries
+        output_path: Path to save the summary file
+        format: Output format - 'csv' or 'json' (default: 'csv')
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    if format == 'csv':
+        # Convert to DataFrame and save as CSV
+        df = pd.DataFrame(metrics_list)
+        df.to_csv(output_path, index=False)
+        print(f"Metrics saved to: {output_path}")
+    elif format == 'json':
+        # Save as JSON
+        with open(output_path, 'w') as f:
+            json.dump(metrics_list, f, indent=2)
+        print(f"Metrics saved to: {output_path}")
+    else:
+        raise ValueError(f"Unsupported format: {format}. Use 'csv' or 'json'.")

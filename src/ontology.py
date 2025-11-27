@@ -57,6 +57,27 @@ def combine_scores(ml_scores: np.ndarray, ontology_penalties: np.ndarray,
                   alpha: float = 0.7, beta: float = 0.3) -> np.ndarray:
     """
     Combine ML anomaly scores with ontology penalties.
-    Final Score = alpha * ML_Score + beta * Ontology_Penalty
+    
+    The ML scores are normalized to [0, 1] range before combining to ensure
+    both components are on a comparable scale.
+    
+    Final Score = alpha * normalized(ML_Score) + beta * Ontology_Penalty
+    
+    Args:
+        ml_scores: Raw anomaly scores from ML model
+        ontology_penalties: Penalty scores from ontology rules (assumed 0-1 range)
+        alpha: Weight for ML score component (default: 0.7)
+        beta: Weight for ontology penalty component (default: 0.3)
+        
+    Returns:
+        Combined anomaly scores
     """
-    return alpha * ml_scores + beta * ontology_penalties
+    # Normalize ML scores to [0, 1] range
+    ml_min, ml_max = ml_scores.min(), ml_scores.max()
+    if ml_max > ml_min:
+        ml_scores_normalized = (ml_scores - ml_min) / (ml_max - ml_min)
+    else:
+        ml_scores_normalized = np.zeros_like(ml_scores)
+    
+    # Combine normalized scores
+    return alpha * ml_scores_normalized + beta * ontology_penalties
