@@ -373,5 +373,16 @@ By the end of this refactoring plan:
 
 ---
 
-**Current Status**: 📋 READY TO START
+## Notebook Refactor Status
+
+- [x] 01_eda.ipynb aligned with src.preprocessing
+- [x] Baseline IF/AE notebook merged and aligned with src.models
+- [x] Supervised baselines (DecisionTree, RandomForest) added to baseline notebook
+- [x] Ontology demo notebook aligned with src.ontology and run_pipeline_direct.py
+- [x] Old exploratory notebooks moved to archive/notebooks/
+- [ ] Add interactive visualizations for ontology rule impact (future enhancement)
+
+---
+
+**Current Status**: READY TO START
 **Last Updated**: 2025-11-30
