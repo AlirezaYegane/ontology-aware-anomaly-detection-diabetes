@@ -10,6 +10,11 @@ warnings.filterwarnings('ignore')
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / 'src'))
+from src.config import GLOBAL_CONFIG
+from src.logger import get_logger
+from src.evaluation import compute_classification_metrics, plot_roc_pr_curves
+
+
 
 def print_section(title):
     """Print formatted section header"""
@@ -43,10 +48,22 @@ def main():
         figures_dir = results_dir / 'figures'
         models_dir = results_dir / 'models'
         reports_dir = results_dir / 'reports'
-        
+        logs_dir = results_dir / 'logs'
+
         figures_dir.mkdir(parents=True, exist_ok=True)
         models_dir.mkdir(parents=True, exist_ok=True)
         reports_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir.mkdir(parents=True, exist_ok=True)
+
+        logger = get_logger("pipeline", logs_dir)
+
+
+        # Set up logger
+        cfg = GLOBAL_CONFIG
+        logger = get_logger("pipeline", logs_dir)
+        logger.info("Starting pipeline run")
+        logger.info(f"Base directory: {base_dir}")
+
         
         # Load data
         print("📥 Loading raw data...")
@@ -74,12 +91,21 @@ def main():
         
         # Train/test split
         print("\n✂️  Splitting data...")
+        cfg = GLOBAL_CONFIG
+
         X_train, X_test, y_train, y_test = train_test_split_stratified(
             X,
             y,
-            test_size=0.2,
-            random_state=42,
+            test_size=cfg.data.test_size,
+            random_state=cfg.data.random_seeds[0],
         )
+
+        logger.info(
+            f"Train/Test split with test_size={cfg.data.test_size}, "
+            f"seed={cfg.data.random_seeds[0]}: "
+            f"X_train={X_train.shape}, X_test={X_test.shape}"
+        )
+
 
         # Log train set class balance (for anomaly rate)
         train_pos = int(y_train.sum())
@@ -120,13 +146,23 @@ def main():
         from src.evaluation import compute_classification_metrics, plot_roc_pr_curves
         
         print("🌲 Training Isolation Forest...")
-        contamination = float(train_pos_rate)  # from section 3.1
-        
+        # If config.contamination == -1.0, use train_pos_rate as unsupervised anomaly rate
+        if cfg.isolation_forest.contamination < 0:
+            contamination = float(train_pos_rate)
+        else:
+            contamination = float(cfg.isolation_forest.contamination)
+
         if_detector = IsolationForestDetector(
-            n_estimators=200,
+            n_estimators=cfg.isolation_forest.n_estimators,
             contamination=contamination,
-            random_state=42
+            random_state=cfg.isolation_forest.random_state,
         )
+
+        logger.info(
+            f"Training Isolation Forest: n_estimators={cfg.isolation_forest.n_estimators}, "
+            f"contamination={contamination:.4f}, random_state={cfg.isolation_forest.random_state}"
+        )
+
         # Fit on normal-only training data
         if_detector.fit(X_train_normal_if)
 
@@ -168,11 +204,20 @@ def main():
         print("🧠 Training Autoencoder...")
         ae_detector = AutoencoderDetector(
             input_dim=X_train.shape[1],
-            hidden_dims=[128, 64, 32],
-            epochs=50,
-            batch_size=256,
-            learning_rate=0.001
+            hidden_dims=list(cfg.autoencoder.hidden_dims),
+            epochs=cfg.autoencoder.epochs,
+            batch_size=cfg.autoencoder.batch_size,
+            learning_rate=cfg.autoencoder.learning_rate,
         )
+
+        logger.info(
+            "Training Autoencoder: "
+            f"hidden_dims={cfg.autoencoder.hidden_dims}, "
+            f"epochs={cfg.autoencoder.epochs}, "
+            f"batch_size={cfg.autoencoder.batch_size}, "
+            f"lr={cfg.autoencoder.learning_rate}"
+        )
+
         
         # Use the same normal-mask logic for Autoencoder
         normal_mask_ae = (y_train == 0)
@@ -211,10 +256,100 @@ def main():
         return 1
     
     # =========================================================================
+    # STEP 3b: Supervised Baselines (Decision Tree & Random Forest)
+    # =========================================================================
+    print_section("STEP 3b: Supervised Baselines (Decision Tree & Random Forest)")
+
+    dt_metrics = None
+    rf_metrics = None
+
+    try:
+        from src.models import DecisionTreeDetector, RandomForestDetector
+
+        # ---------------------------
+        # Decision Tree baseline
+        # ---------------------------
+        print("🌳 Training Decision Tree (supervised baseline)...")
+        dt_detector = DecisionTreeDetector(
+            max_depth=8,
+            min_samples_leaf=50,
+            random_state=42,
+            class_weight="balanced",
+        )
+        dt_detector.fit(X_train, y_train)
+
+        print("\n📊 Computing Decision Tree scores...")
+        dt_scores_test = dt_detector.predict_scores(X_test)
+
+        print("\n============================================================")
+        print("Decision Tree - Evaluation Results")
+        print("============================================================")
+        dt_metrics = compute_classification_metrics(
+            y_test, dt_scores_test, model_name="DecisionTree"
+        )
+        print(f"ROC-AUC:              {dt_metrics['roc_auc']:.4f}")
+        print(f"Precision-Recall AUC: {dt_metrics['pr_auc']:.4f}")
+        print("============================================================")
+
+        print("\n💾 Saving Decision Tree ROC/PR plot...")
+        plot_roc_pr_curves(
+            y_test,
+            dt_scores_test,
+            title="Decision Tree (supervised baseline)",
+            save_path=str(figures_dir / "dt_roc_pr.png"),
+        )
+        print(f"✅ Saved plot: {figures_dir / 'dt_roc_pr.png'}")
+
+        # ---------------------------
+        # Random Forest baseline
+        # ---------------------------
+        print("\n🌲🌲 Training Random Forest (supervised baseline)...")
+        rf_detector = RandomForestDetector(
+            n_estimators=300,
+            max_depth=None,
+            min_samples_leaf=50,
+            random_state=42,
+            class_weight="balanced_subsample",
+            n_jobs=-1,
+        )
+        rf_detector.fit(X_train, y_train)
+
+        print("\n📊 Computing Random Forest scores...")
+        rf_scores_test = rf_detector.predict_scores(X_test)
+
+        print("\n============================================================")
+        print("Random Forest - Evaluation Results")
+        print("============================================================")
+        rf_metrics = compute_classification_metrics(
+            y_test, rf_scores_test, model_name="RandomForest"
+        )
+        print(f"ROC-AUC:              {rf_metrics['roc_auc']:.4f}")
+        print(f"Precision-Recall AUC: {rf_metrics['pr_auc']:.4f}")
+        print("============================================================")
+
+        print("\n💾 Saving Random Forest ROC/PR plot...")
+        plot_roc_pr_curves(
+            y_test,
+            rf_scores_test,
+            title="Random Forest (supervised baseline)",
+            save_path=str(figures_dir / "rf_roc_pr.png"),
+        )
+        print(f"✅ Saved plot: {figures_dir / 'rf_roc_pr.png'}")
+
+        print("✅ STEP 3b COMPLETE")
+
+    except Exception as e:
+        print(f"❌ Error in STEP 3b (Supervised baselines): {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
+    # =========================================================================
     # STEP 4: Ontology-Enhanced Evaluation
     # =========================================================================
     print_section("STEP 4: Ontology-Enhanced Evaluation")
-    
+
     try:
         from src.ontology import apply_ontology_rules, combine_scores
         from src.preprocessing import (
@@ -227,10 +362,10 @@ def main():
 
         print("🔬 Computing ontology penalty...")
 
-        csv_path = base_dir / 'data' / 'raw' / 'diabetic_data.csv'
+        csv_path = base_dir / "data" / "raw" / "diabetic_data.csv"
         if not csv_path.exists():
             raise FileNotFoundError(f"Cannot find CSV at {csv_path}")
-        
+
         # Rebuild a *clinical* feature DataFrame aligned with the ML pipeline
         df_raw_full = load_raw_data(str(csv_path))
         selected_features = get_selected_features()
@@ -242,36 +377,48 @@ def main():
             X_clinical_full, y_full, test_size=0.2, random_state=42
         )
 
+        # Sanity check with y_test length
         if len(X_clin_test) != len(y_test):
-            print(f"⚠️ Ontology warning: test set length mismatch "
-                  f"(X_clin_test={len(X_clin_test)}, y_test={len(y_test)}). "
-                  "Skipping ontology enhancement.")
-            combined_scores = if_scores_test
-            combined_metrics = compute_classification_metrics(
-                y_test, combined_scores, model_name="IF + Ontology (skipped)"
+            print(
+                f"⚠️ Ontology warning: test set length mismatch "
+                f"(X_clin_test={len(X_clin_test)}, y_test={len(y_test)}). "
+                "Skipping ontology enhancement."
             )
+            combined_scores_if = if_scores_test
+            if_ont_metrics = compute_classification_metrics(
+                y_test, combined_scores_if, model_name="IF + Ontology (skipped)"
+            )
+            # AE+Ont و ensemble در این حالت تعریف نمی‌شود
         else:
             # Apply ontology rules on the clinical test DataFrame
             ontology_penalties_test, rule_stats = apply_ontology_rules(
                 X_clin_test,
-                y_clin_test.to_numpy()
+                y_clin_test.to_numpy(),
             )
 
-            # Sanity check on shapes
             if len(ontology_penalties_test) != len(if_scores_test):
-                print(f"⚠️ Ontology warning: penalty length {len(ontology_penalties_test)} "
-                      f"!= IF scores length {len(if_scores_test)}. "
-                      "Skipping ontology enhancement.")
-                combined_scores = if_scores_test
-                combined_metrics = compute_classification_metrics(
-                    y_test, combined_scores, model_name="IF + Ontology (skipped)"
+                print(
+                    f"⚠️ Ontology warning: penalty length {len(ontology_penalties_test)} "
+                    f"!= IF scores length {len(if_scores_test)}. "
+                    "Skipping ontology enhancement."
+                )
+                combined_scores_if = if_scores_test
+                if_ont_metrics = compute_classification_metrics(
+                    y_test, combined_scores_if, model_name="IF + Ontology (skipped)"
                 )
             else:
-                print("\n🔗 Combining IF scores with ontology rules...")
+                print("\n🔗 Combining model scores with ontology rules...")
 
-                # Try a small grid of lambda (ontology weight) values
                 lambda_values = [0.0, 0.1, 0.3, 0.5]
-                combo_results = []
+
+                def _score_key(item):
+                    _lam, _scores, _metrics = item
+                    return (_metrics["pr_auc"], _metrics["roc_auc"])
+
+                # ---------------------------------------------------------
+                # IF + Ontology
+                # ---------------------------------------------------------
+                if_combo_results = []
                 for lam in lambda_values:
                     alpha = 1.0 - lam
                     beta = lam
@@ -287,68 +434,128 @@ def main():
                         scores_lam,
                         model_name=f"IF+Ontology (λ={lam:.2f})",
                     )
-                    combo_results.append((lam, scores_lam, metrics_lam))
+                    if_combo_results.append((lam, scores_lam, metrics_lam))
 
-                # Pick best lambda by PR-AUC (primary), ROC-AUC as tie-breaker
-                def _score_key(item):
-                    lam, _scores, metrics = item
-                    return (metrics['pr_auc'], metrics['roc_auc'])
-
-                best_idx = max(
-                    range(len(combo_results)),
-                    key=lambda i: _score_key(combo_results[i])
+                best_idx_if = max(
+                    range(len(if_combo_results)), key=lambda i: _score_key(if_combo_results[i])
                 )
-                best_lambda, combined_scores, combined_metrics = combo_results[best_idx]
+                best_lambda_if, combined_scores_if, if_ont_metrics = if_combo_results[best_idx_if]
 
-                print(f"✅ Ontology enhancement applied with best λ={best_lambda:.2f}")
-                print("\n📈 Evaluation for best λ:")
-                print(f"   ROC-AUC: {combined_metrics['roc_auc']:.4f}")
-                print(f"   PR-AUC:  {combined_metrics['pr_auc']:.4f}")
+                print(f"\n✅ IF+Ontology enhancement applied with best λ={best_lambda_if:.2f}")
+                print("\n📈 Evaluation for IF+Ontology (best λ):")
+                print(f"   ROC-AUC: {if_ont_metrics['roc_auc']:.4f}")
+                print(f"   PR-AUC:  {if_ont_metrics['pr_auc']:.4f}")
 
                 print("\n📊 Lambda sweep summary (IF + Ontology):")
                 print(f"{'λ':<6} {'ROC-AUC':<10} {'PR-AUC':<10}")
-                for lam, _scores, m in combo_results:
+                for lam, _scores, m in if_combo_results:
                     print(f"{lam:<6.2f} {m['roc_auc']:<10.4f} {m['pr_auc']:<10.4f}")
 
-                # Print rule-level summary
-                print("\n" + "="*80)
+                # ---------------------------------------------------------
+                # AE + Ontology
+                # ---------------------------------------------------------
+                ae_combo_results = []
+                for lam in lambda_values:
+                    alpha = 1.0 - lam
+                    beta = lam
+                    scores_lam = combine_scores(
+                        ae_scores_test,
+                        ontology_penalties_test,
+                        alpha=alpha,
+                        beta=beta,
+                        normalize_ml=True,
+                    )
+                    metrics_lam = compute_classification_metrics(
+                        y_test,
+                        scores_lam,
+                        model_name=f"AE+Ontology (λ={lam:.2f})",
+                    )
+                    ae_combo_results.append((lam, scores_lam, metrics_lam))
+
+                best_idx_ae = max(
+                    range(len(ae_combo_results)), key=lambda i: _score_key(ae_combo_results[i])
+                )
+                best_lambda_ae, ae_ont_scores, ae_ont_metrics = ae_combo_results[best_idx_ae]
+
+                print(f"\n✅ AE+Ontology enhancement applied with best λ={best_lambda_ae:.2f}")
+                print("\n📈 Evaluation for AE+Ontology (best λ):")
+                print(f"   ROC-AUC: {ae_ont_metrics['roc_auc']:.4f}")
+                print(f"   PR-AUC:  {ae_ont_metrics['pr_auc']:.4f}")
+
+                print("\n📊 Lambda sweep summary (AE + Ontology):")
+                print(f"{'λ':<6} {'ROC-AUC':<10} {'PR-AUC':<10}")
+                for lam, _scores, m in ae_combo_results:
+                    print(f"{lam:<6.2f} {m['roc_auc']:<10.4f} {m['pr_auc']:<10.4f}")
+
+                # ---------------------------------------------------------
+                # Ontology-aware ensemble: average of IF+Ont and AE+Ont
+                # ---------------------------------------------------------
+                ensemble_scores = 0.5 * combined_scores_if + 0.5 * ae_ont_scores
+                ensemble_metrics = compute_classification_metrics(
+                    y_test,
+                    ensemble_scores,
+                    model_name="Ensemble(IF+Ont, AE+Ont)",
+                )
+
+                print("\n🤝 Ontology-aware ensemble (IF+Ont + AE+Ont):")
+                print(f"   ROC-AUC: {ensemble_metrics['roc_auc']:.4f}")
+                print(f"   PR-AUC:  {ensemble_metrics['pr_auc']:.4f}")
+
+                # ---------------------------------------------------------
+                # Rule-level summary
+                # ---------------------------------------------------------
+                print("\n" + "=" * 80)
                 print("  ONTOLOGY RULES SUMMARY (TEST SET)")
-                print("="*80)
+                print("=" * 80)
                 print(f"{'Rule':<35} {'Fired':>8} {'Fired & y=1':>12} {'Precision':>12}")
-                print("-"*80)
+                print("-" * 80)
                 total_fired = 0
                 total_fired_pos = 0
                 for rule_name, stats_dict in rule_stats.items():
-                    fired = stats_dict.get('fired', 0)
-                    fired_pos = stats_dict.get('fired_positive', 0)
+                    fired = stats_dict.get("fired", 0)
+                    fired_pos = stats_dict.get("fired_positive", 0)
                     prec = (fired_pos / fired) if fired > 0 else 0.0
                     if fired > 0:
                         total_fired += fired
                         total_fired_pos += fired_pos
                     print(f"{rule_name:<35} {fired:>8} {fired_pos:>12} {prec:>12.3f}")
-                print("-"*80)
-                print(f"{'Any rule fired (non-unique hits)':<35} {total_fired:>8} {total_fired_pos:>12}")
-        
-        print("\n📈 Evaluating enhanced model...")
-        print(f"""
-============================================================
-IF+Ontology - Evaluation Results
-============================================================
-ROC-AUC:              {combined_metrics['roc_auc']:.4f}
-Precision-Recall AUC: {combined_metrics['pr_auc']:.4f}
-============================================================""")
+                print("-" * 80)
+                print(
+                    f"{'Any rule fired (non-unique hits)':<35} "
+                    f"{total_fired:>8} {total_fired_pos:>12}"
+                )
 
-        print("\n💾 Saving results...")
-        plot_roc_pr_curves(
-            y_test,
-            combined_scores,
-            title=f"IF + Ontology (λ={best_lambda:.2f})" if 'best_lambda' in locals() else "IF + Ontology",
-            save_path=str(figures_dir / 'ontology_roc_pr.png'),
-        )
-        print(f"✅ Saved plot: {figures_dir / 'ontology_roc_pr.png'}")
-        
+        # Plotting section (if IF+Ont at least موجود است)
+        print("\n📈 Evaluating enhanced models (plots)...")
+        if if_ont_metrics is not None:
+            plot_roc_pr_curves(
+                y_test,
+                combined_scores_if,
+                title=f"IF + Ontology (λ={best_lambda_if:.2f})",
+                save_path=str(figures_dir / "ontology_if_roc_pr.png"),
+            )
+            print(f"✅ Saved plot: {figures_dir / 'ontology_if_roc_pr.png'}")
+
+        if ae_ont_metrics is not None:
+            plot_roc_pr_curves(
+                y_test,
+                ae_ont_scores,
+                title=f"AE + Ontology (λ={best_lambda_ae:.2f})",
+                save_path=str(figures_dir / 'ontology_ae_roc_pr.png'),
+            )
+            print(f"✅ Saved plot: {figures_dir / 'ontology_ae_roc_pr.png'}")
+
+        if ensemble_metrics is not None:
+            plot_roc_pr_curves(
+                y_test,
+                ensemble_scores,
+                title="Ensemble (IF+Ont + AE+Ont)",
+                save_path=str(figures_dir / "ontology_ensemble_roc_pr.png"),
+            )
+            print(f"✅ Saved plot: {figures_dir / 'ontology_ensemble_roc_pr.png'}")
+
         print("✅ STEP 4 COMPLETE")
-        
+
     except Exception as e:
         print(f"❌ Error in Step 4: {e}")
         import traceback
@@ -365,10 +572,11 @@ Precision-Recall AUC: {combined_metrics['pr_auc']:.4f}
         import json
         import numpy as np
 
-        # می‌تونی این لیست رو هرطور دوست داری عوض کنی
-        seeds = [42, 123, 456, 789, 2025]
+        seeds = list(GLOBAL_CONFIG.data.random_seeds)
+        logger.info(f"Running multi-split evaluation for seeds={seeds}")
 
         all_results = []
+
 
         for seed in seeds:
             print(f"\n🔁 Running experiment for random_state={seed} ...")
@@ -469,13 +677,57 @@ Precision-Recall AUC: {combined_metrics['pr_auc']:.4f}
     # FINAL SUMMARY
     # =========================================================================
     print_section("PIPELINE EXECUTION SUMMARY")
-    
-    print("📊 Model Performance Comparison:\n")
-    print(f"{'Model':<20} {'ROC-AUC':<12} {'PR-AUC':<12}")
-    print("-" * 44)
-    print(f"{'Isolation Forest':<20} {if_metrics['roc_auc']:<12.4f} {if_metrics['pr_auc']:<12.4f}")
-    print(f"{'Autoencoder':<20} {ae_metrics['roc_auc']:<12.4f} {ae_metrics['pr_auc']:<12.4f}")
-    print(f"{'IF + Ontology':<20} {combined_metrics['roc_auc']:<12.4f} {combined_metrics['pr_auc']:<12.4f}")
+
+    print("📊 Model Performance Comparison (single split):\n")
+    print(f"{'Model':<22} {'ROC-AUC':<14} {'PR-AUC':<14}")
+    print("-" * 54)
+
+    # Supervised baselines
+    if dt_metrics is not None:
+        print(
+            f"{'Decision Tree':<22} "
+            f"{dt_metrics['roc_auc']:<14.4f} {dt_metrics['pr_auc']:<14.4f}"
+        )
+    if rf_metrics is not None:
+        print(
+            f"{'Random Forest':<22} "
+            f"{rf_metrics['roc_auc']:<14.4f} {rf_metrics['pr_auc']:<14.4f}"
+        )
+
+    # Unsupervised baselines
+    if if_metrics is not None:
+        print(
+            f"{'Isolation Forest':<22} "
+            f"{if_metrics['roc_auc']:<14.4f} {if_metrics['pr_auc']:<14.4f}"
+        )
+    if ae_metrics is not None:
+        print(
+            f"{'Autoencoder':<22} "
+            f"{ae_metrics['roc_auc']:<14.4f} {ae_metrics['pr_auc']:<14.4f}"
+        )
+
+    # Ontology-aware models
+    if if_ont_metrics is not None:
+        print(
+            f"{'IF + Ontology':<22} "
+            f"{if_ont_metrics['roc_auc']:<14.4f} {if_ont_metrics['pr_auc']:<14.4f}"
+        )
+    if ae_ont_metrics is not None:
+        print(
+            f"{'AE + Ontology':<22} "
+            f"{ae_ont_metrics['roc_auc']:<14.4f} {ae_ont_metrics['pr_auc']:<14.4f}"
+        )
+    if ensemble_metrics is not None:
+        print(
+            f"{'Ont. Ensemble':<22} "
+            f"{ensemble_metrics['roc_auc']:<14.4f} {ensemble_metrics['pr_auc']:<14.4f}"
+        )
+
+    print("\n📁 Generated Files:")
+    for file in sorted(figures_dir.glob("*.png")):
+        print(f"   ✅ {file.relative_to(base_dir)}")
+
+    print("\n✅ ALL PIPELINE STEPS COMPLETED SUCCESSFULLY!")
     
     print("\n📁 Generated Files:")
     for file in sorted(figures_dir.glob('*.png')):

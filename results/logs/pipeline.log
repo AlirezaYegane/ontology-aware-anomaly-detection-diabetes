@@ -1,0 +1,13 @@
+2025-11-28 06:40:57 | INFO     | pipeline | Starting pipeline run
+2025-11-28 06:40:57 | INFO     | pipeline | Base directory: C:\Users\Asus\Desktop\PY projects\Ontology-aware Anomaly Detection Toy Pipeline
+2025-11-28 06:50:44 | INFO     | pipeline | Starting pipeline run
+2025-11-28 06:50:44 | INFO     | pipeline | Base directory: C:\Users\Asus\Desktop\PY projects\Ontology-aware Anomaly Detection Toy Pipeline
+2025-11-28 06:50:45 | INFO     | pipeline | Train/Test split with test_size=0.2, seed=42: X_train=(79594, 30), X_test=(19899, 30)
+2025-11-28 06:50:45 | INFO     | pipeline | Training Isolation Forest: n_estimators=200, contamination=0.1123, random_state=42
+2025-11-28 06:50:47 | INFO     | pipeline | Training Autoencoder: hidden_dims=[128, 64, 32], epochs=50, batch_size=256, lr=0.001
+2025-11-28 06:53:51 | INFO     | pipeline | Starting pipeline run
+2025-11-28 06:53:51 | INFO     | pipeline | Base directory: C:\Users\Asus\Desktop\PY projects\Ontology-aware Anomaly Detection Toy Pipeline
+2025-11-28 06:53:52 | INFO     | pipeline | Train/Test split with test_size=0.2, seed=42: X_train=(79594, 30), X_test=(19899, 30)
+2025-11-28 06:53:52 | INFO     | pipeline | Training Isolation Forest: n_estimators=200, contamination=0.1123, random_state=42
+2025-11-28 06:53:54 | INFO     | pipeline | Training Autoencoder: hidden_dims=[128, 64, 32], epochs=50, batch_size=256, lr=0.001
+2025-11-28 06:54:33 | INFO     | pipeline | Running multi-split evaluation for seeds=[42, 123, 456, 789, 2025]

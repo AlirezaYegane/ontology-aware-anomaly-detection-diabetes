@@ -15,6 +15,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+import numpy as np
+
 
 
 # =============================================================================
@@ -257,6 +261,83 @@ class AutoencoderDetector:
 
         return np.concatenate(all_scores, axis=0)
 
+class DecisionTreeDetector:
+    """
+    Supervised Decision Tree baseline.
+
+    Interface:
+        - fit(X, y)
+        - predict_scores(X) -> probability of positive class (y=1)
+    """
+
+    def __init__(
+        self,
+        max_depth: int | None = 8,
+        min_samples_leaf: int = 50,
+        random_state: int = 42,
+        class_weight: str | None = "balanced",
+    ) -> None:
+        self.model = DecisionTreeClassifier(
+            max_depth=max_depth,
+            min_samples_leaf=min_samples_leaf,
+            random_state=random_state,
+            class_weight=class_weight,
+        )
+
+    def fit(self, X, y):
+        """Train supervised decision tree."""
+        self.model.fit(X, y)
+        return self
+
+    def predict_scores(self, X) -> np.ndarray:
+        """
+        Return anomaly / risk scores as P(y=1 | x).
+        """
+        proba = self.model.predict_proba(X)
+        # column 1 is probability of positive class
+        return proba[:, 1]
+
+
+class RandomForestDetector:
+    """
+    Supervised Random Forest baseline.
+
+    Interface matches other detectors:
+        - fit(X, y)
+        - predict_scores(X) -> probability of positive class (y=1)
+    """
+
+    def __init__(
+        self,
+        n_estimators: int = 300,
+        max_depth: int | None = None,
+        min_samples_leaf: int = 50,
+        random_state: int = 42,
+        class_weight: str | None = "balanced_subsample",
+        n_jobs: int = -1,
+    ) -> None:
+        self.model = RandomForestClassifier(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            min_samples_leaf=min_samples_leaf,
+            random_state=random_state,
+            class_weight=class_weight,
+            n_jobs=n_jobs,
+        )
+
+    def fit(self, X, y):
+        """Train supervised random forest."""
+        self.model.fit(X, y)
+        return self
+
+    def predict_scores(self, X) -> np.ndarray:
+        """
+        Return anomaly / risk scores as P(y=1 | x).
+        """
+        proba = self.model.predict_proba(X)
+        return proba[:, 1]
+
+
 
 # =============================================================================
 # "Specification-compliant" aliases (in case other code uses them)
@@ -280,3 +361,97 @@ def score_isolation_forest(model: IsolationForest, X: np.ndarray) -> np.ndarray:
     Alias for get_if_anomaly_scores() - specification-compliant name.
     """
     return get_if_anomaly_scores(model, X)
+
+
+# -------------------------------------------------------------------
+# Supervised baselines: Decision Tree & Random Forest
+# -------------------------------------------------------------------
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+import numpy as np
+
+
+class DecisionTreeDetector:
+    """
+    ساده‌ترین supervised baseline:
+    یک DecisionTreeClassifier که خروجی‌اش احتمال y=1 است.
+    """
+
+    def __init__(
+        self,
+        max_depth: int = 8,
+        min_samples_leaf: int = 50,
+        random_state: int = 42,
+        class_weight="balanced",
+    ):
+        self.model = DecisionTreeClassifier(
+            max_depth=max_depth,
+            min_samples_leaf=min_samples_leaf,
+            random_state=random_state,
+            class_weight=class_weight,
+        )
+
+    def fit(self, X, y):
+        """
+        X: array-like, shape (n_samples, n_features)
+        y: array-like, shape (n_samples,)
+        """
+        self.model.fit(X, y)
+        return self
+
+    def predict_scores(self, X) -> np.ndarray:
+        """
+        برمی‌گردونه probability کلاس مثبت (y=1)
+        """
+        proba = self.model.predict_proba(X)
+        # معمولاً ستون دوم احتمال y=1 است
+        if proba.shape[1] == 2:
+            return proba[:, 1]
+        # اگر به هر دلیلی فقط یک کلاس دیده شده باشد، همون ستون اول را برمی‌گردونیم
+        return proba[:, 0]
+
+    def predict_labels(self, X, threshold: float = 0.5) -> np.ndarray:
+        """
+        بر اساس threshold روی probability، label باینری می‌دهد.
+        """
+        scores = self.predict_scores(X)
+        return (scores >= threshold).astype(int)
+
+
+class RandomForestDetector:
+    """
+    RandomForestClassifier به عنوان supervised baseline قوی‌تر.
+    """
+
+    def __init__(
+        self,
+        n_estimators: int = 300,
+        max_depth=None,
+        min_samples_leaf: int = 50,
+        random_state: int = 42,
+        class_weight="balanced_subsample",
+        n_jobs: int = -1,
+    ):
+        self.model = RandomForestClassifier(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            min_samples_leaf=min_samples_leaf,
+            random_state=random_state,
+            class_weight=class_weight,
+            n_jobs=n_jobs,
+        )
+
+    def fit(self, X, y):
+        self.model.fit(X, y)
+        return self
+
+    def predict_scores(self, X) -> np.ndarray:
+        proba = self.model.predict_proba(X)
+        if proba.shape[1] == 2:
+            return proba[:, 1]
+        return proba[:, 0]
+
+    def predict_labels(self, X, threshold: float = 0.5) -> np.ndarray:
+        scores = self.predict_scores(X)
+        return (scores >= threshold).astype(int)
+
