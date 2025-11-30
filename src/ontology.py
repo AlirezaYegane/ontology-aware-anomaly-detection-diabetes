@@ -1,24 +1,28 @@
-"""Ontology-Inspired Rule Layer for Anomaly Detection.
+"""
+Ontology-inspired rule layer for anomaly detection.
 
-This module implements simple, transparent clinical rules on top of the
-Diabetes 130-US hospitals dataset. It produces:
+This module implements a small set of transparent, clinically motivated rules
+on top of the Diabetes 130-US hospitals dataset. It provides:
 
 - A per-patient ontology penalty in [0, 1]
 - Rule-level trigger statistics for analysis
 - A combiner to mix ML anomaly scores with ontology penalties
 """
 
+from __future__ import annotations
+
 from typing import Dict, Tuple, List, Optional
 
 import numpy as np
 import pandas as pd
 
+
 # -------------------------------------------------------------------------
 # Rule definitions
 # -------------------------------------------------------------------------
 
-# Weights for each ontology rule. The actual logic for when each rule fires
-# is implemented in _evaluate_rules().
+# Weights for each ontology rule.
+# The actual firing logic is implemented in _evaluate_rules().
 RULE_WEIGHTS: Dict[str, float] = {
     # Poor glycemic control and no adequate medication adjustment
     "poor_control_no_med_change": 0.9,
@@ -34,14 +38,18 @@ RULE_WEIGHTS: Dict[str, float] = {
 
 
 def _safe_get(row: pd.Series, key: str, default=None):
-    """Helper to safely access a value from a row."""
+    """Safely access a value from a pandas row with a default."""
     return row[key] if key in row.index else default
 
 
 def _evaluate_rules(row: pd.Series) -> Dict[str, int]:
-    """Evaluate ontology rules on a single row.
+    """
+    Evaluate ontology rules on a single patient row.
 
-    Returns a dict {rule_name: 0/1} indicating whether each rule fired.
+    Returns
+    -------
+    Dict[str, int]
+        Mapping rule_name -> 0/1 indicating whether each rule fired.
     """
     flags: Dict[str, int] = {name: 0 for name in RULE_WEIGHTS.keys()}
 
@@ -50,14 +58,14 @@ def _evaluate_rules(row: pd.Series) -> Dict[str, int]:
     max_glu = _safe_get(row, "max_glu_serum")
     change = _safe_get(row, "change")
     diabetes_med = _safe_get(row, "diabetesMed")
-    insulin = _safe_get(row, "insulin")
+    insulin = _safe_get(row, "insulin")  # Currently unused, kept for future rules
 
     num_inpatient = _safe_get(row, "number_inpatient", 0) or 0
     num_emergency = _safe_get(row, "number_emergency", 0) or 0
     num_meds = _safe_get(row, "num_medications", 0) or 0
     time_in_hosp = _safe_get(row, "time_in_hospital", 0) or 0
 
-    # Normalize string values a bit
+    # Normalise string values slightly
     if isinstance(a1c, str):
         a1c = a1c.strip()
     if isinstance(max_glu, str):
@@ -74,7 +82,7 @@ def _evaluate_rules(row: pd.Series) -> Dict[str, int]:
     #
     # Trigger if:
     #   - A1Cresult in {">7", ">8"}
-    #   - AND (no medication change OR diabetesMed == 'No')
+    #   - AND (no medication change OR diabetesMed == "No")
     # ------------------------------------------------------------------
     if a1c in {">7", ">8"} and (change == "No" or diabetes_med == "No"):
         flags["poor_control_no_med_change"] = 1
@@ -133,37 +141,71 @@ def _evaluate_rules(row: pd.Series) -> Dict[str, int]:
     return flags
 
 
-def compute_ontology_penalty(row: pd.Series) -> float:
-    """Compute a scalar ontology penalty in [0, 1] for a single row.
-
-    The penalty is a weighted sum over all fired rules, clipped to [0, 1].
-    This function is intentionally simple so it can be used independently
-    in notebooks or tests.
+def _penalty_from_flags(flags: Dict[str, int]) -> float:
     """
-    flags = _evaluate_rules(row)
+    Aggregate rule fires into a single penalty in [0, 1].
+
+    Parameters
+    ----------
+    flags : Dict[str, int]
+        Mapping rule_name -> 0/1.
+
+    Returns
+    -------
+    float
+        Ontology penalty, clipped to [0, 1].
+    """
     penalty = 0.0
     for rule_name, fired in flags.items():
         if fired:
             penalty += RULE_WEIGHTS.get(rule_name, 0.0)
     # Clip to [0, 1]
-    penalty = float(max(0.0, min(1.0, penalty)))
-    return penalty
+    return float(max(0.0, min(1.0, penalty)))
+
+
+def compute_ontology_penalty(row: pd.Series) -> float:
+    """
+    Compute a scalar ontology penalty in [0, 1] for a single patient row.
+
+    The penalty is a weighted sum over all fired rules, clipped to [0, 1].
+    This function is intentionally simple so it can be used independently
+    in notebooks or tests.
+
+    Parameters
+    ----------
+    row : pd.Series
+        Single patient record from the clinical feature table.
+
+    Returns
+    -------
+    float
+        Ontology penalty in [0, 1].
+    """
+    flags = _evaluate_rules(row)
+    return _penalty_from_flags(flags)
 
 
 def apply_ontology_rules(
     df: pd.DataFrame,
     y: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, Dict[str, Dict[str, int]]]:
-    """Apply ontology rules to an entire DataFrame.
+    """
+    Apply ontology rules to an entire cohort DataFrame.
 
-    Args:
-        df: DataFrame containing at least the columns used by the rules.
-        y: Optional binary target array (0/1) aligned with df rows. If provided,
-           rule-level stats will include how often rules fired on positive cases.
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing at least the columns used by the rules.
+    y : np.ndarray, optional
+        Optional binary target array (0/1) aligned with df rows. If provided,
+        rule-level stats will include how often rules fired on positive cases.
 
-    Returns:
-        penalties: np.ndarray of shape (len(df),) with ontology penalties in [0, 1]
-        rule_stats: dict mapping rule_name -> {"fired": int, "fired_positive": int}
+    Returns
+    -------
+    penalties : np.ndarray
+        Array of shape (n_samples,) with ontology penalties in [0, 1].
+    rule_stats : Dict[str, Dict[str, int]]
+        Mapping rule_name -> {"fired": int, "fired_positive": int}
     """
     penalties: List[float] = []
     rule_stats: Dict[str, Dict[str, int]] = {
@@ -177,14 +219,14 @@ def apply_ontology_rules(
 
     for idx, (_, row) in enumerate(df.iterrows()):
         flags = _evaluate_rules(row)
-        penalty = 0.0
+        penalty = _penalty_from_flags(flags)
+
         for rule_name, fired in flags.items():
             if fired:
-                penalty += RULE_WEIGHTS.get(rule_name, 0.0)
                 rule_stats[rule_name]["fired"] += 1
                 if y_array is not None and y_array[idx] == 1:
                     rule_stats[rule_name]["fired_positive"] += 1
-        penalty = float(max(0.0, min(1.0, penalty)))
+
         penalties.append(penalty)
 
     return np.asarray(penalties, dtype=float), rule_stats
@@ -197,17 +239,26 @@ def combine_scores(
     beta: float = 0.3,
     normalize_ml: bool = True,
 ) -> np.ndarray:
-    """Combine ML anomaly scores with ontology penalties.
+    """
+    Combine ML anomaly scores with ontology penalties.
 
-    Args:
-        ml_scores: Raw anomaly scores from the ML model (larger = more anomalous).
-        ontology_penalties: Penalties from apply_ontology_rules(), in [0, 1].
-        alpha: Weight for the ML component.
-        beta: Weight for the ontology component.
-        normalize_ml: If True, min-max normalise ml_scores to [0, 1] before combining.
+    Parameters
+    ----------
+    ml_scores : np.ndarray
+        Raw anomaly scores from the ML model (larger = more anomalous).
+    ontology_penalties : np.ndarray
+        Penalties from apply_ontology_rules(), in [0, 1].
+    alpha : float, default 0.7
+        Weight for the ML component.
+    beta : float, default 0.3
+        Weight for the ontology component.
+    normalize_ml : bool, default True
+        If True, min-max normalise ml_scores to [0, 1] before combining.
 
-    Returns:
-        combined_scores: np.ndarray of shape (n_samples,)
+    Returns
+    -------
+    np.ndarray
+        Combined scores of shape (n_samples,).
     """
     ml_scores = np.asarray(ml_scores, dtype=float)
     ontology_penalties = np.asarray(ontology_penalties, dtype=float)
@@ -218,6 +269,7 @@ def combine_scores(
         if ml_max > ml_min:
             ml_norm = (ml_scores - ml_min) / (ml_max - ml_min)
         else:
+            # Degenerate case: constant scores
             ml_norm = np.zeros_like(ml_scores)
     else:
         ml_norm = ml_scores

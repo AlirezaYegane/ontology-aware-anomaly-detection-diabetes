@@ -1,144 +1,215 @@
 """
-Utility functions for hybrid local/Colab environment support
-Automatically detects environment and configures paths
-"""
-import sys
-import os
-from pathlib import Path
+Environment and path utilities for local / Colab execution.
 
-def setup_paths():
+This module provides small helper functions to:
+
+- Detect whether the code is running in a local environment or Google Colab.
+- Add the project root (containing `src/`) to `sys.path`.
+- Ensure a standard `results/` directory structure exists.
+
+The primary entry point is `setup_paths()`, which is safe to call from
+notebooks or scripts before importing from `src`.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+from typing import Literal
+
+from .logger import get_logger
+
+
+logger = get_logger(name="paths")
+
+
+def setup_paths() -> Literal["colab", "local"]:
     """
-    Universal path fixer for hybrid local/Colab execution.
-    Automatically detects environment and adds project root to sys.path.
-    
-    Returns:
-        str: Detected environment ('colab' or 'local')
+    Configure `sys.path` and working directory for hybrid local/Colab execution.
+
+    Behaviour
+    ---------
+    - Detects whether we are running inside Google Colab.
+    - Tries to locate a project root directory that contains a `src/` folder.
+    - In Colab, changes the current working directory to the detected project root.
+    - Ensures the project root is present in `sys.path`.
+    - Verifies that imports from `src` are possible.
+
+    Returns
+    -------
+    env_type : {'colab', 'local'}
+        Detected environment type.
     """
-    # Check if running in Google Colab
+    # Detect Colab vs local
     try:
-        import google.colab
+        import google.colab  # type: ignore  # noqa: F401
+
         in_colab = True
-        env_type = 'colab'
+        env_type: Literal["colab", "local"] = "colab"
     except ImportError:
         in_colab = False
-        env_type = 'local'
-    
+        env_type = "local"
+
     if in_colab:
-        print("☁️  Detected: Google Colab Environment")
-        
-        # Try to find project root in Colab
-        # Common patterns:
-        # 1. /content/Ontology-aware Anomaly Detection Toy Pipeline/
-        # 2. /content/ontology-anomaly-detection/
-        # 3. Current directory if unzipped here
-        
-        possible_roots = [
-            '/content/Ontology-aware Anomaly Detection Toy Pipeline',
-            '/content',
-        ]
-        
-        # Also check for any directory containing 'ontology' in current location
-        try:
-            current_dirs = [d for d in os.listdir('/content') 
-                          if os.path.isdir(os.path.join('/content', d)) 
-                          and 'ontology' in d.lower()]
-            for dirname in current_dirs:
-                possible_roots.insert(0, os.path.join('/content', dirname))
-        except:
-            pass
-        
-        # Find the first valid root (contains src/ directory)
-        project_root = None
-        for root in possible_roots:
-            if os.path.exists(root) and os.path.exists(os.path.join(root, 'src')):
-                project_root = root
-                break
-        
-        if project_root is None:
-            # Fallback: use current directory if it has src/
-            if os.path.exists('src'):
-                project_root = os.getcwd()
-            else:
-                # Last resort: try one level up
-                parent = os.path.dirname(os.getcwd())
-                if os.path.exists(os.path.join(parent, 'src')):
-                    project_root = parent
-                else:
-                    project_root = '/content'
-        
-        # Change to project root
-        os.chdir(project_root)
-        
+        logger.info("Detected Google Colab environment.")
+        project_root = _detect_project_root_colab()
     else:
-        print("💻 Detected: Local Environment")
-        
-        # For local: detect if we're in notebooks/ or root
-        current_dir = os.getcwd()
-        
-        if 'notebooks' in current_dir or current_dir.endswith('notebooks'):
-            # We're in notebooks directory, go up one level
-            project_root = os.path.abspath(os.path.join(current_dir, '..'))
-        else:
-            # We're likely in root already
-            project_root = current_dir
-        
-        # Verify src/ exists
-        if not os.path.exists(os.path.join(project_root, 'src')):
-            # Try parent directory
-            parent = os.path.abspath(os.path.join(project_root, '..'))
-            if os.path.exists(os.path.join(parent, 'src')):
-                project_root = parent
-    
-    # Add project root to sys.path if not already there
-    if project_root not in sys.path:
-        sys.path.insert(0, project_root)
-        print(f"✅ Added to sys.path: {project_root}")
+        logger.info("Detected local environment.")
+        project_root = _detect_project_root_local()
+
+    # Add project root to sys.path if needed
+    project_root_str = str(project_root)
+    if project_root_str not in sys.path:
+        sys.path.insert(0, project_root_str)
+        logger.info("Added project root to sys.path: %s", project_root_str)
     else:
-        print(f"✅ Already in sys.path: {project_root}")
-    
-    # Verify we can import from src
+        logger.debug("Project root already present in sys.path: %s", project_root_str)
+
+    # Verify imports from src
     try:
-        from src import preprocessing
-        print("✅ Successfully imported from src/")
-    except ImportError as e:
-        print(f"⚠️  Warning: Could not import from src/: {e}")
-        print(f"   Current sys.path: {sys.path[:3]}...")
-    
+        import src  # type: ignore  # noqa: F401
+
+        logger.info("Successfully imported from 'src/'.")
+    except ImportError as exc:
+        logger.warning(
+            "Could not import from 'src/': %s. Current sys.path starts with: %s",
+            exc,
+            sys.path[:3],
+        )
+
     return env_type
 
-def get_project_root():
+
+def _detect_project_root_colab() -> Path:
     """
-    Get the project root directory.
-    
-    Returns:
-        Path: Project root directory
+    Best-effort detection of project root in a Google Colab environment.
+
+    The function looks for a directory that contains a `src/` folder, trying
+    a small set of common paths under `/content`.
+
+    Returns
+    -------
+    Path
+        Detected project root. Falls back to `/content` if nothing better is found.
+    """
+    base = Path("/content")
+
+    # Common patterns + dynamic search under /content
+    candidates: list[Path] = []
+
+    # First: any directory under /content whose name contains "ontology"
+    try:
+        if base.exists():
+            for entry in base.iterdir():
+                if entry.is_dir() and "ontology" in entry.name.lower():
+                    candidates.append(entry)
+    except Exception as exc:  # very defensive; Colab FS can be odd
+        logger.debug("Error while scanning /content: %s", exc)
+
+    # Then: a couple of explicit fallbacks
+    candidates.extend(
+        [
+            base / "Ontology-aware Anomaly Detection Toy Pipeline",
+            base,
+        ]
+    )
+
+    # Select first candidate that has a src/ directory
+    for root in candidates:
+        if (root / "src").exists():
+            logger.info("Using project root: %s", root)
+            os.chdir(root)
+            return root
+
+    # Fallbacks if nothing above worked
+    cwd = Path.cwd()
+    if (cwd / "src").exists():
+        logger.info("Using current directory as project root: %s", cwd)
+        return cwd
+
+    parent = cwd.parent
+    if (parent / "src").exists():
+        logger.info("Using parent directory as project root: %s", parent)
+        os.chdir(parent)
+        return parent
+
+    # Last resort: /content itself
+    logger.warning("Could not find a directory with 'src/'. Falling back to /content.")
+    os.chdir(base)
+    return base
+
+
+def _detect_project_root_local() -> Path:
+    """
+    Detect the project root in a local environment.
+
+    Heuristic
+    ---------
+    - If we are inside a `notebooks/` directory, use its parent as the root.
+    - Otherwise, try the current directory; if it has no `src/`, try the parent.
+
+    Returns
+    -------
+    Path
+        Detected project root.
+    """
+    current_dir = Path.cwd()
+
+    if current_dir.name == "notebooks" or "notebooks" in str(current_dir):
+        project_root = current_dir.parent
+    else:
+        project_root = current_dir
+
+    if not (project_root / "src").exists():
+        parent = project_root.parent
+        if (parent / "src").exists():
+            project_root = parent
+
+    logger.info("Local project root resolved to: %s", project_root)
+    return project_root
+
+
+def get_project_root() -> Path:
+    """
+    Return the project root directory as a Path object.
+
+    The function assumes that the project root is the closest ancestor of the
+    current working directory that contains a `src/` directory. If none is
+    found, it falls back to the current working directory.
     """
     current = Path.cwd()
-    
-    # Check if current directory has src/
-    if (current / 'src').exists():
+
+    if (current / "src").exists():
         return current
-    
-    # Check if parent has src/
-    if (current.parent / 'src').exists():
+
+    if (current.parent / "src").exists():
         return current.parent
-    
-    # Default to current
+
     return current
 
-def ensure_results_dir():
+
+def ensure_results_dir() -> Path:
     """
-    Ensure results directory structure exists.
-    Creates subdirectories for figures, models, and reports.
+    Ensure the `results/` directory structure exists.
+
+    Creates (if needed):
+
+    - results/
+      - figures/
+      - models/
+      - reports/
+
+    Returns
+    -------
+    Path
+        Path to the `results/` directory.
     """
     project_root = get_project_root()
-    results_dir = project_root / 'results'
-    
-    # Create subdirectories
-    (results_dir / 'figures').mkdir(parents=True, exist_ok=True)
-    (results_dir / 'models').mkdir(parents=True, exist_ok=True)
-    (results_dir / 'reports').mkdir(parents=True, exist_ok=True)
-    
-    print(f"✅ Results directory ready: {results_dir}")
-    
+    results_dir = project_root / "results"
+
+    for subdir in ("figures", "models", "reports"):
+        (results_dir / subdir).mkdir(parents=True, exist_ok=True)
+
+    logger.info("Results directory is ready at: %s", results_dir)
     return results_dir

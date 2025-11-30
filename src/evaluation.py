@@ -1,233 +1,205 @@
 """
-Evaluation module for Anomaly Detection models.
+Evaluation utilities for anomaly detection models.
+
+This module provides:
+- ROC-AUC / PR-AUC computation
+- Threshold-based summaries
+- Pretty-printed evaluation tables
+- Single-model and multi-model ROC / PR plots
+- Helpers for exporting metrics to disk
 """
 
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-from sklearn.metrics import (
-    roc_auc_score, 
-    average_precision_score,
-    precision_recall_curve,
-    roc_curve,
-    precision_score,
-    recall_score
-)
-from typing import Dict, List, Optional
+from __future__ import annotations
+
 import json
 from pathlib import Path
+from typing import Dict, List, Optional
 
-def evaluate_anomaly_detector(y_true: np.ndarray, anomaly_scores: np.ndarray, model_name: str = "Model") -> Dict[str, float]:
-    """
-    Evaluate anomaly detector using various metrics.
-    """
-    # Compute ROC-AUC
-    roc_auc = roc_auc_score(y_true, anomaly_scores)
-    
-    # Compute PR-AUC
-    pr_auc = average_precision_score(y_true, anomaly_scores)
-    
-    # Example thresholds: percentiles of anomaly scores
-    thresholds = [
-        np.percentile(anomaly_scores, 90),
-        np.percentile(anomaly_scores, 95),
-        np.percentile(anomaly_scores, 99)
-    ]
-    
-    print(f"\n{'='*60}")
-    print(f"{model_name} - Evaluation Results")
-    print(f"{'='*60}")
-    print(f"ROC-AUC:              {roc_auc:.4f}")
-    print(f"Precision-Recall AUC: {pr_auc:.4f}")
-    print(f"\n{'-'*60}")
-    print(f"Performance at Different Thresholds:")
-    print(f"{'-'*60}")
-    print(f"{'Percentile':<12} {'Precision':<12} {'Recall':<12} {'Flagged %':<12}")
-    print(f"{'-'*60}")
-    
-    for percentile, threshold in zip([90, 95, 99], thresholds):
-        y_pred = (anomaly_scores >= threshold).astype(int)
-        precision = precision_score(y_true, y_pred, zero_division=0)
-        recall = recall_score(y_true, y_pred, zero_division=0)
-        flagged_pct = (y_pred.sum() / len(y_pred)) * 100
-        
-        print(f"{percentile:>3}th        {precision:>8.4f}     {recall:>8.4f}     {flagged_pct:>8.2f}%")
-    
-    print(f"{'='*60}\n")
-    
-    return {
-        'roc_auc': roc_auc,
-        'pr_auc': pr_auc,
-        'model_name': model_name
-    }
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from sklearn.metrics import (
+    average_precision_score,
+    precision_recall_curve,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+    roc_curve,
+)
 
-def compute_roc_pr(y_true: np.ndarray, anomaly_scores: np.ndarray) -> Dict[str, float]:
+__all__ = [
+    "compute_roc_pr",
+    "summarize_at_thresholds",
+    "evaluate_anomaly_detector",
+    "compute_classification_metrics",
+    "plot_roc_pr_curves",
+    "plot_evaluation_curves",
+    "plot_roc_pr",
+    "print_comparison_table",
+    "save_metrics_summary",
+]
+
+
+# ============================================================================
+# Core metric computation
+# ============================================================================
+
+def compute_roc_pr(
+    y_true: np.ndarray,
+    anomaly_scores: np.ndarray,
+) -> Dict[str, float]:
     """
     Compute ROC-AUC and PR-AUC metrics.
-    Specification-compliant function for metric computation.
-    
-    Args:
-        y_true: True labels
-        anomaly_scores: Anomaly scores from model
-        
-    Returns:
-        Dictionary with 'roc_auc' and 'pr_auc' keys
+
+    Parameters
+    ----------
+    y_true :
+        Binary ground-truth labels (0 = normal, 1 = anomaly).
+    anomaly_scores :
+        Anomaly scores from the model (higher = more suspicious).
+
+    Returns
+    -------
+    Dict[str, float]
+        Dictionary with keys:
+        - "roc_auc"
+        - "pr_auc"
     """
     roc_auc = roc_auc_score(y_true, anomaly_scores)
     pr_auc = average_precision_score(y_true, anomaly_scores)
-    return {'roc_auc': roc_auc, 'pr_auc': pr_auc}
+    return {"roc_auc": roc_auc, "pr_auc": pr_auc}
 
-def summarize_at_thresholds(y_true: np.ndarray, anomaly_scores: np.ndarray, 
-                            percentiles: List[int] = [90, 95, 99]) -> List[Dict[str, float]]:
+
+def summarize_at_thresholds(
+    y_true: np.ndarray,
+    anomaly_scores: np.ndarray,
+    percentiles: Optional[List[int]] = None,
+) -> List[Dict[str, float]]:
     """
-    Summarize performance at different threshold percentiles.
-    Specification-compliant function for threshold analysis.
-    
-    Args:
-        y_true: True labels
-        anomaly_scores: Anomaly scores from model
-        percentiles: List of percentile values to evaluate
-        
-    Returns:
-        List of dictionaries containing threshold metrics
+    Summarize precision/recall behavior at score percentiles.
+
+    Parameters
+    ----------
+    y_true :
+        Binary ground-truth labels.
+    anomaly_scores :
+        Anomaly scores from the model.
+    percentiles :
+        List of percentiles to evaluate (e.g. [90, 95, 99]).
+        If None, defaults to [90, 95, 99].
+
+    Returns
+    -------
+    List[Dict[str, float]]
+        One dictionary per percentile with keys:
+        - "percentile", "threshold", "precision", "recall", "flagged_pct"
     """
-    results = []
+    if percentiles is None:
+        percentiles = [90, 95, 99]
+
+    results: List[Dict[str, float]] = []
     for percentile in percentiles:
-        threshold = np.percentile(anomaly_scores, percentile)
+        threshold = float(np.percentile(anomaly_scores, percentile))
         y_pred = (anomaly_scores >= threshold).astype(int)
+
         precision = precision_score(y_true, y_pred, zero_division=0)
         recall = recall_score(y_true, y_pred, zero_division=0)
-        flagged_pct = (y_pred.sum() / len(y_pred)) * 100
-        
-        results.append({
-            'percentile': percentile,
-            'threshold': threshold,
-            'precision': precision,
-            'recall': recall,
-            'flagged_pct': flagged_pct
-        })
-    
+        flagged_pct = (y_pred.sum() / len(y_pred)) * 100.0
+
+        results.append(
+            {
+                "percentile": percentile,
+                "threshold": threshold,
+                "precision": float(precision),
+                "recall": float(recall),
+                "flagged_pct": float(flagged_pct),
+            }
+        )
+
     return results
 
-def plot_evaluation_curves(y_test: np.ndarray, model_scores: Dict[str, np.ndarray]):
-    """
-    Plot ROC and Precision-Recall curves for multiple anomaly detectors.
-    
-    Args:
-        y_test: True labels
-        model_scores: Dictionary mapping model names to their anomaly scores
-    """
-    fig, axes = plt.subplots(1, 2, figsize=(15, 5))
-    colors = ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D']
-    
-    # === ROC Curve ===
-    ax = axes[0]
-    
-    for i, (name, scores) in enumerate(model_scores.items()):
-        fpr, tpr, _ = roc_curve(y_test, scores)
-        roc_auc = roc_auc_score(y_test, scores)
-        color = colors[i % len(colors)]
-        ax.plot(fpr, tpr, label=f'{name} (AUC = {roc_auc:.3f})', 
-                linewidth=2, color=color)
-    
-    # Diagonal reference line
-    ax.plot([0, 1], [0, 1], 'k--', linewidth=1, alpha=0.3, label='Random Classifier')
-    
-    ax.set_xlabel('False Positive Rate', fontsize=12, fontweight='bold')
-    ax.set_ylabel('True Positive Rate', fontsize=12, fontweight='bold')
-    ax.set_title('ROC Curve - Anomaly Detection', fontsize=14, fontweight='bold')
-    ax.legend(loc='lower right', fontsize=10)
-    ax.grid(True, alpha=0.3)
-    
-    # === Precision-Recall Curve ===
-    ax = axes[1]
-    
-    for i, (name, scores) in enumerate(model_scores.items()):
-        precision, recall, _ = precision_recall_curve(y_test, scores)
-        pr_auc = average_precision_score(y_test, scores)
-        color = colors[i % len(colors)]
-        ax.plot(recall, precision, label=f'{name} (AUC = {pr_auc:.3f})', 
-                linewidth=2, color=color)
-    
-    # Baseline (proportion of positives)
-    baseline = y_test.sum() / len(y_test)
-    ax.axhline(y=baseline, color='k', linestyle='--', linewidth=1, 
-               alpha=0.3, label=f'Baseline ({baseline:.3f})')
-    
-    ax.set_xlabel('Recall', fontsize=12, fontweight='bold')
-    ax.set_ylabel('Precision', fontsize=12, fontweight='bold')
-    ax.set_title('Precision-Recall Curve - Anomaly Detection', fontsize=14, fontweight='bold')
-    ax.legend(loc='best', fontsize=10)
-    ax.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.show()
 
-def print_comparison_table(metrics_list: List[Dict[str, float]]):
-    """
-    Print a comparison table of multiple models.
-    """
-    print(f"\n{'='*60}")
-    print(f"MODEL COMPARISON TABLE")
-    print(f"{'='*60}")
-    print(f"{'Model':<25} {'ROC-AUC':<15} {'PR-AUC':<15}")
-    print(f"{'-'*60}")
-    
-    for metrics in metrics_list:
-        model_name = metrics['model_name']
-        roc_auc = metrics['roc_auc']
-        pr_auc = metrics['pr_auc']
-        print(f"{model_name:<25} {roc_auc:<15.4f} {pr_auc:<15.4f}")
-    
-    print(f"{'='*60}\n")
+# ============================================================================
+# High-level evaluation with pretty printing
+# ============================================================================
 
-def plot_roc_pr(y_test: np.ndarray, model_scores: Dict[str, np.ndarray]):
+def evaluate_anomaly_detector(
+    y_true: np.ndarray,
+    anomaly_scores: np.ndarray,
+    model_name: str = "Model",
+) -> Dict[str, float]:
     """
-    Plot ROC and PR curves for multiple models.
-    Alias for plot_evaluation_curves() - specification-compliant name.
-    """
-    return plot_evaluation_curves(y_test, model_scores)
+    Evaluate an anomaly detector and print a compact console report.
 
-def save_metrics_summary(metrics_list: List[Dict[str, float]], output_path: str, format: str = 'csv'):
+    This is the verbose helper used in notebooks / scripts:
+    - computes ROC-AUC and PR-AUC
+    - prints a 90th/95th/99th percentile threshold table
+
+    Parameters
+    ----------
+    y_true :
+        Binary ground-truth labels.
+    anomaly_scores :
+        Anomaly scores from the model.
+    model_name :
+        Name of the model, used in printed headers.
+
+    Returns
+    -------
+    Dict[str, float]
+        Dictionary with keys:
+        - "roc_auc"
+        - "pr_auc"
+        - "model_name"
     """
-    Save model comparison metrics to a file.
-    Specification-compliant function for exporting results.
-    
-    Args:
-        metrics_list: List of metric dictionaries
-        output_path: Path to save the summary file
-        format: Output format - 'csv' or 'json' (default: 'csv')
-    """
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    if format == 'csv':
-        # Convert to DataFrame and save as CSV
-        df = pd.DataFrame(metrics_list)
-        df.to_csv(output_path, index=False)
-        print(f"Metrics saved to: {output_path}")
-    elif format == 'json':
-        # Save as JSON
-        with open(output_path, 'w') as f:
-            json.dump(metrics_list, f, indent=2)
-        print(f"Metrics saved to: {output_path}")
-    else:
-        raise ValueError(f"Unsupported format: {format}. Use 'csv' or 'json'.")
+    roc_pr = compute_roc_pr(y_true, anomaly_scores)
+    thresholds_summary = summarize_at_thresholds(y_true, anomaly_scores)
+
+    roc_auc = roc_pr["roc_auc"]
+    pr_auc = roc_pr["pr_auc"]
+
+    print("\n" + "=" * 60)
+    print(f"{model_name} - Evaluation Results")
+    print("=" * 60)
+    print(f"ROC-AUC:              {roc_auc:.4f}")
+    print(f"Precision-Recall AUC: {pr_auc:.4f}")
+    print("\n" + "-" * 60)
+    print("Performance at Different Thresholds:")
+    print("-" * 60)
+    print(f"{'Percentile':<12} {'Precision':<12} {'Recall':<12} {'Flagged %':<12}")
+    print("-" * 60)
+
+    for row in thresholds_summary:
+        p = row["percentile"]
+        prec = row["precision"]
+        rec = row["recall"]
+        flagged = row["flagged_pct"]
+        print(f"{p:>3}th        {prec:>8.4f}     {rec:>8.4f}     {flagged:>8.2f}%")
+
+    print("=" * 60 + "\n")
+
+    return {
+        "roc_auc": roc_auc,
+        "pr_auc": pr_auc,
+        "model_name": model_name,
+    }
+
+
 def compute_classification_metrics(
     y_true: np.ndarray,
     anomaly_scores: np.ndarray,
-    model_name: str = "Model"
+    model_name: str = "Model",
 ) -> Dict[str, float]:
     """
-    Wrapper used by run_pipeline_direct.py.
+    Convenience wrapper used by ``run_pipeline_direct.py``.
 
     Computes ROC-AUC and PR-AUC and returns a metrics dict with:
-        - 'roc_auc'
-        - 'pr_auc'
-        - 'model_name'
+        - ``roc_auc``
+        - ``pr_auc``
+        - ``model_name``
 
-    Internally از evaluate_anomaly_detector استفاده می‌کند
-    تا رفتار در نوت‌بوک‌ها و اسکریپت یکی باشد.
+    Internally delegates to :func:`evaluate_anomaly_detector` so that
+    notebooks and scripts share the same output format.
     """
     return evaluate_anomaly_detector(
         y_true=y_true,
@@ -235,6 +207,10 @@ def compute_classification_metrics(
         model_name=model_name,
     )
 
+
+# ============================================================================
+# Plotting utilities
+# ============================================================================
 
 def plot_roc_pr_curves(
     y_true: np.ndarray,
@@ -244,25 +220,22 @@ def plot_roc_pr_curves(
     show: bool = False,
 ) -> None:
     """
-    Plot ROC and Precision–Recall curves for a SINGLE model,
-    و نتیجه را اگر save_path داده شده باشد روی دیسک ذخیره می‌کند.
+    Plot ROC and Precision–Recall curves for a single model.
 
     Parameters
     ----------
-    y_true : np.ndarray
-        برچسب‌های باینری واقعی (0/1).
-    anomaly_scores : np.ndarray
-        نمره‌ی آنومالی، هرچه بیشتر = مشکوک‌تر.
-    title : str
-        عنوان نمودارها.
-    save_path : Optional[str]
-        مسیر ذخیره‌ی فایل PNG.
-    show : bool
-        اگر True باشد نمودار نمایش داده می‌شود، در غیر این صورت فقط ذخیره/بسته می‌شود.
+    y_true :
+        Binary ground-truth labels (0/1).
+    anomaly_scores :
+        Anomaly scores (higher = more anomalous).
+    title :
+        Plot title prefix.
+    save_path :
+        Optional path to save the figure as PNG.
+    show :
+        If True, display the figure; otherwise it is closed after saving.
     """
-    # ROC
     fpr, tpr, _ = roc_curve(y_true, anomaly_scores)
-    # PR
     precision, recall, _ = precision_recall_curve(y_true, anomaly_scores)
 
     roc_auc = roc_auc_score(y_true, anomaly_scores)
@@ -270,7 +243,7 @@ def plot_roc_pr_curves(
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    # --- ROC Curve ---
+    # ROC curve
     ax = axes[0]
     ax.plot(fpr, tpr, linewidth=2)
     ax.plot([0, 1], [0, 1], "k--", linewidth=1, alpha=0.3)
@@ -279,7 +252,7 @@ def plot_roc_pr_curves(
     ax.set_title(f"ROC — {title} (AUC = {roc_auc:.3f})")
     ax.grid(True, alpha=0.3)
 
-    # --- Precision–Recall Curve ---
+    # Precision–Recall curve
     ax = axes[1]
     ax.plot(recall, precision, linewidth=2)
     baseline = y_true.sum() / len(y_true) if len(y_true) > 0 else 0.0
@@ -299,16 +272,155 @@ def plot_roc_pr_curves(
 
     plt.tight_layout()
 
-    # ذخیره‌ی فایل اگر مسیر داده شده
     if save_path is not None:
         save_path = str(save_path)
         Path(save_path).parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(save_path, dpi=150)
         print(f"Saved ROC/PR figure for '{title}' to: {save_path}")
 
-    # نمایش یا بستن شکل
     if show:
         plt.show()
     else:
         plt.close(fig)
 
+
+def plot_evaluation_curves(
+    y_true: np.ndarray,
+    model_scores: Dict[str, np.ndarray],
+) -> None:
+    """
+    Plot ROC and Precision–Recall curves for multiple anomaly detectors.
+
+    Parameters
+    ----------
+    y_true :
+        Binary ground-truth labels.
+    model_scores :
+        Mapping from model name to anomaly score array.
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+    colors = ["#2E86AB", "#A23B72", "#F18F01", "#C73E1D"]
+
+    # ROC curves
+    ax = axes[0]
+    for i, (name, scores) in enumerate(model_scores.items()):
+        fpr, tpr, _ = roc_curve(y_true, scores)
+        roc_auc = roc_auc_score(y_true, scores)
+        color = colors[i % len(colors)]
+        ax.plot(
+            fpr,
+            tpr,
+            label=f"{name} (AUC = {roc_auc:.3f})",
+            linewidth=2,
+            color=color,
+        )
+
+    ax.plot([0, 1], [0, 1], "k--", linewidth=1, alpha=0.3, label="Random classifier")
+    ax.set_xlabel("False Positive Rate")
+    ax.set_ylabel("True Positive Rate")
+    ax.set_title("ROC Curve - Anomaly Detection")
+    ax.legend(loc="lower right")
+    ax.grid(True, alpha=0.3)
+
+    # Precision–Recall curves
+    ax = axes[1]
+    for i, (name, scores) in enumerate(model_scores.items()):
+        precision, recall, _ = precision_recall_curve(y_true, scores)
+        pr_auc = average_precision_score(y_true, scores)
+        color = colors[i % len(colors)]
+        ax.plot(
+            recall,
+            precision,
+            label=f"{name} (AUC = {pr_auc:.3f})",
+            linewidth=2,
+            color=color,
+        )
+
+    baseline = y_true.sum() / len(y_true)
+    ax.axhline(
+        y=baseline,
+        color="k",
+        linestyle="--",
+        linewidth=1,
+        alpha=0.3,
+        label=f"Baseline ({baseline:.3f})",
+    )
+    ax.set_xlabel("Recall")
+    ax.set_ylabel("Precision")
+    ax.set_title("Precision–Recall Curve - Anomaly Detection")
+    ax.legend(loc="best")
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_roc_pr(
+    y_true: np.ndarray,
+    model_scores: Dict[str, np.ndarray],
+) -> None:
+    """
+    Alias for :func:`plot_evaluation_curves` kept for backward compatibility.
+    """
+    return plot_evaluation_curves(y_true, model_scores)
+
+
+# ============================================================================
+# Reporting helpers
+# ============================================================================
+
+def print_comparison_table(metrics_list: List[Dict[str, float]]) -> None:
+    """
+    Print a plain-text comparison table for multiple models.
+
+    Parameters
+    ----------
+    metrics_list :
+        List of metric dictionaries, each containing at least
+        "model_name", "roc_auc", and "pr_auc".
+    """
+    print("\n" + "=" * 60)
+    print("MODEL COMPARISON TABLE")
+    print("=" * 60)
+    print(f"{'Model':<25} {'ROC-AUC':<15} {'PR-AUC':<15}")
+    print("-" * 60)
+
+    for metrics in metrics_list:
+        model_name = metrics["model_name"]
+        roc_auc = metrics["roc_auc"]
+        pr_auc = metrics["pr_auc"]
+        print(f"{model_name:<25} {roc_auc:<15.4f} {pr_auc:<15.4f}")
+
+    print("=" * 60 + "\n")
+
+
+def save_metrics_summary(
+    metrics_list: List[Dict[str, float]],
+    output_path: str,
+    format: str = "csv",
+) -> None:
+    """
+    Save model comparison metrics to disk.
+
+    Parameters
+    ----------
+    metrics_list :
+        List of metric dictionaries.
+    output_path :
+        Destination file path.
+    format :
+        Output format, one of {"csv", "json"}.
+    """
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if format == "csv":
+        df = pd.DataFrame(metrics_list)
+        df.to_csv(path, index=False)
+        print(f"Metrics saved to: {path}")
+    elif format == "json":
+        with path.open("w", encoding="utf-8") as f:
+            json.dump(metrics_list, f, indent=2)
+        print(f"Metrics saved to: {path}")
+    else:
+        raise ValueError(f"Unsupported format: {format}. Use 'csv' or 'json'.")

@@ -8,9 +8,10 @@ from typing import List
 # =========================
 @dataclass
 class DataConfig:
-    # نسبت تست‌ست
+    """Configuration for data splitting and sampling."""
+    # Fraction of the dataset used as test set
     test_size: float = 0.2
-    # برای اسپلیت‌های مختلف در Step 5
+    # Random seeds used for different splits (single-run + multi-split eval)
     random_seeds: List[int] = field(
         default_factory=lambda: [42, 123, 456, 789, 2025]
     )
@@ -21,8 +22,9 @@ class DataConfig:
 # =========================
 @dataclass
 class IsolationForestConfig:
+    """Hyperparameters for the Isolation Forest detector."""
     n_estimators: int = 200
-    # اگر < 0.0 باشد، از train_pos_rate استفاده می‌کنیم
+    # If < 0.0, the training positive rate is used as contamination
     contamination: float = -1.0
     random_state: int = 42
 
@@ -32,6 +34,7 @@ class IsolationForestConfig:
 # =========================
 @dataclass
 class AutoencoderConfig:
+    """Hyperparameters for the Autoencoder-based detector."""
     hidden_dims: List[int] = field(default_factory=lambda: [128, 64, 32])
     epochs: int = 50
     batch_size: int = 256
@@ -40,24 +43,17 @@ class AutoencoderConfig:
 
 # =========================
 # Ontology / rules config
-# (فعلاً تو run_pipeline مستقیم λها رو نوشتی،
-#  ولی این structure رو هم داریم برای آینده)
 # =========================
 @dataclass
 class OntologyConfig:
+    """
+    Configuration for ontology integration.
+
+    lambda_grid controls the weight given to ontology penalties when
+    combining model scores with rule-based signals.
+    """
     lambda_grid: List[float] = field(
         default_factory=lambda: [0.0, 0.1, 0.3, 0.5]
-    )
-
-
-# =========================
-# Evaluation (multi-split) config
-# (اگر بعداً خواستی seeds رو از اینجا بخونی)
-# =========================
-@dataclass
-class EvaluationConfig:
-    seeds: List[int] = field(
-        default_factory=lambda: [42, 123, 456, 789, 2025]
     )
 
 
@@ -66,6 +62,7 @@ class EvaluationConfig:
 # =========================
 @dataclass
 class GlobalConfig:
+    """Top-level container for all configuration sections."""
     data: DataConfig = field(default_factory=DataConfig)
     isolation_forest: IsolationForestConfig = field(
         default_factory=IsolationForestConfig
@@ -74,9 +71,7 @@ class GlobalConfig:
         default_factory=AutoencoderConfig
     )
     ontology: OntologyConfig = field(default_factory=OntologyConfig)
-    evaluation: EvaluationConfig = field(
-        default_factory=EvaluationConfig
-    )
 
 
+# Singleton-style global configuration used across the project
 GLOBAL_CONFIG = GlobalConfig()

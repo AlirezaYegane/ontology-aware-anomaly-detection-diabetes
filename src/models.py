@@ -1,46 +1,50 @@
 """
-Models module for Diabetes Hospital Readmission Anomaly Detection.
+Model definitions for hospital readmission anomaly detection.
+
 Includes:
-- IsolationForestDetector  (wrapper around sklearn IsolationForest)
-- AutoencoderDetector      (PyTorch feed-forward autoencoder)
+    - FeedforwardAutoencoder (PyTorch module)
+    - IsolationForestDetector (unsupervised baseline)
+    - AutoencoderDetector (unsupervised reconstruction baseline)
+    - DecisionTreeDetector (supervised baseline)
+    - RandomForestDetector (supervised baseline)
+    - Thin helper aliases for spec-compatibility
 """
+
+from __future__ import annotations
+
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
-from typing import Optional, List
-
-from sklearn.ensemble import IsolationForest
-
+from sklearn.ensemble import IsolationForest, RandomForestClassifier
+from sklearn.tree import DecisionTreeClassifier
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier
-import numpy as np
-
 
 
 # =============================================================================
 # Feed-forward Autoencoder backbone
 # =============================================================================
 
+
 class FeedforwardAutoencoder(nn.Module):
     """
     Simple fully-connected autoencoder.
 
-    encoder:  input_dim -> h1 -> h2 -> ... -> bottleneck
-    decoder:  bottleneck -> ... -> h2 -> h1 -> input_dim
+    Encoder:  input_dim -> h1 -> h2 -> ... -> bottleneck
+    Decoder:  bottleneck -> ... -> h2 -> h1 -> input_dim
     """
 
-    def __init__(self, input_dim: int, hidden_dims: Optional[List[int]] = None):
+    def __init__(self, input_dim: int, hidden_dims: Optional[List[int]] = None) -> None:
         super().__init__()
 
         if hidden_dims is None:
             hidden_dims = [128, 64, 32]
 
         # Encoder
-        encoder_layers = []
+        encoder_layers: list[nn.Module] = []
         prev_dim = input_dim
         for h in hidden_dims:
             encoder_layers.append(nn.Linear(prev_dim, h))
@@ -48,8 +52,8 @@ class FeedforwardAutoencoder(nn.Module):
             prev_dim = h
         self.encoder = nn.Sequential(*encoder_layers)
 
-        # Decoder (mirror)
-        decoder_layers = []
+        # Decoder (mirror of encoder)
+        decoder_layers: list[nn.Module] = []
         rev_hidden = list(reversed(hidden_dims))
         prev_dim = rev_hidden[0]
         for h in rev_hidden[1:]:
@@ -66,8 +70,9 @@ class FeedforwardAutoencoder(nn.Module):
 
 
 # =============================================================================
-# Isolation Forest Detector
+# Isolation Forest Detector (unsupervised)
 # =============================================================================
+
 
 def train_isolation_forest(
     X_train: np.ndarray,
@@ -89,13 +94,14 @@ def train_isolation_forest(
 
 def get_if_anomaly_scores(model: IsolationForest, X: np.ndarray) -> np.ndarray:
     """
-    Get anomaly scores from Isolation Forest.
+    Compute anomaly scores from an Isolation Forest model.
 
     sklearn's IsolationForest.score_samples:
         - higher score = more "normal"
-    در اینجا برای anomaly score:
-        - بالاتر = مشکوک‌تر
-    پس منفی‌اش می‌کنیم.
+
+    We convert it to an anomaly score:
+        - higher score = more anomalous / suspicious
+    by taking the negative of score_samples.
     """
     scores = -model.score_samples(X)
     return scores
@@ -103,11 +109,11 @@ def get_if_anomaly_scores(model: IsolationForest, X: np.ndarray) -> np.ndarray:
 
 class IsolationForestDetector:
     """
-    Wrapper used by run_pipeline_direct.py
+    Wrapper used by run_pipeline_direct.py.
 
     Methods:
         - fit(X_train)
-        - predict_scores(X)
+        - predict_scores(X) -> anomaly scores (higher = more anomalous)
     """
 
     def __init__(
@@ -115,7 +121,7 @@ class IsolationForestDetector:
         contamination: float = 0.1,
         random_state: int = 42,
         n_estimators: int = 100,
-    ):
+    ) -> None:
         self.contamination = contamination
         self.random_state = random_state
         self.n_estimators = n_estimators
@@ -137,14 +143,15 @@ class IsolationForestDetector:
 
 
 # =============================================================================
-# Autoencoder Detector
+# Autoencoder Detector (unsupervised)
 # =============================================================================
+
 
 class AutoencoderDetector:
     """
-    High-level detector API for the autoencoder model.
+    High-level detector API for the feed-forward autoencoder.
 
-    Used by run_pipeline_direct.py as:
+    Typical usage:
 
         ae = AutoencoderDetector(
             input_dim=X_train.shape[1],
@@ -153,8 +160,11 @@ class AutoencoderDetector:
             batch_size=256,
             learning_rate=1e-3,
         )
-        ae.fit(X_train)
+        ae.fit(X_train_normal)
         scores = ae.predict_scores(X_test)
+
+    The anomaly score for each sample is its mean-squared reconstruction error.
+    Higher scores correspond to more anomalous samples.
     """
 
     def __init__(
@@ -165,7 +175,7 @@ class AutoencoderDetector:
         batch_size: int = 256,
         learning_rate: float = 1e-3,
         device: Optional[str] = None,
-    ):
+    ) -> None:
         if hidden_dims is None:
             hidden_dims = [128, 64, 32]
 
@@ -185,25 +195,28 @@ class AutoencoderDetector:
         # mean squared error per feature
         self.criterion = nn.MSELoss(reduction="none")
 
-    def fit(self, X_train) -> "AutoencoderDetector":
-        """
-        Train autoencoder on (mostly) normal data.
+    def _to_numpy(self, X: pd.DataFrame | np.ndarray) -> np.ndarray:
+        if isinstance(X, pd.DataFrame):
+            return X.to_numpy(dtype=np.float32)
+        return X.astype(np.float32)
 
-        X_train: numpy array OR pandas DataFrame, shape (n_samples, n_features)
+    def fit(self, X_train: pd.DataFrame | np.ndarray) -> "AutoencoderDetector":
+        """
+        Train the autoencoder on (mostly) normal data.
+
+        Parameters
+        ----------
+        X_train : array-like of shape (n_samples, n_features)
+            Training data. Can be a NumPy array or a pandas DataFrame.
         """
         self.model.train()
 
-        # 🔧 قبول کردن هم numpy هم DataFrame
-        if isinstance(X_train, pd.DataFrame):
-            X_np = X_train.to_numpy(dtype=np.float32)
-        else:
-            X_np = X_train.astype(np.float32)
-
-        X = torch.from_numpy(X_np)
-        dataset = TensorDataset(X)
+        X_np = self._to_numpy(X_train)
+        X_tensor = torch.from_numpy(X_np)
+        dataset = TensorDataset(X_tensor)
         loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
 
-        for epoch in range(self.epochs):
+        for _epoch in range(self.epochs):
             epoch_loss = 0.0
             n_samples = 0
 
@@ -212,46 +225,44 @@ class AutoencoderDetector:
                 self.optimizer.zero_grad()
 
                 recon = self.model(batch)
-                loss_matrix = self.criterion(recon, batch)  # shape (batch, features)
+                loss_matrix = self.criterion(recon, batch)  # (batch, features)
                 loss = loss_matrix.mean()                   # scalar
 
                 loss.backward()
                 self.optimizer.step()
 
-                batch_size_effective = batch.size(0)
-                epoch_loss += loss.item() * batch_size_effective
-                n_samples += batch_size_effective
+                batch_size_eff = batch.size(0)
+                epoch_loss += loss.item() * batch_size_eff
+                n_samples += batch_size_eff
 
-            avg_loss = epoch_loss / max(n_samples, 1)
-            # اگر خواستی، این پرینت دیباگ را فعال کن:
-            # print(f"[Autoencoder] Epoch {epoch+1}/{self.epochs} - loss={avg_loss:.6f}")
+            _avg_loss = epoch_loss / max(n_samples, 1)
+            # Optional: plug logger here if you want epoch-wise tracking.
 
         return self
 
-
     @torch.no_grad()
-    def predict_scores(self, X) -> np.ndarray:
+    def predict_scores(self, X: pd.DataFrame | np.ndarray) -> np.ndarray:
         """
         Compute reconstruction-error-based anomaly scores.
 
-        X: numpy array OR pandas DataFrame
-        Output:
-            scores[i] = MSE reconstruction error for sample i
-            بالاتر = مشکوک‌تر
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Data to score. Can be a NumPy array or a pandas DataFrame.
+
+        Returns
+        -------
+        np.ndarray
+            Vector of anomaly scores. Higher values indicate more anomalous samples.
         """
         self.model.eval()
 
-        # 🔧 قبول کردن DataFrame و numpy
-        if isinstance(X, pd.DataFrame):
-            X_np = X.to_numpy(dtype=np.float32)
-        else:
-            X_np = X.astype(np.float32)
-
+        X_np = self._to_numpy(X)
         X_tensor = torch.from_numpy(X_np)
         dataset = TensorDataset(X_tensor)
         loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
 
-        all_scores = []
+        all_scores: list[np.ndarray] = []
         for (batch,) in loader:
             batch = batch.to(self.device)
             recon = self.model(batch)
@@ -260,6 +271,12 @@ class AutoencoderDetector:
             all_scores.append(scores.cpu().numpy())
 
         return np.concatenate(all_scores, axis=0)
+
+
+# =============================================================================
+# Supervised baselines: Decision Tree & Random Forest
+# =============================================================================
+
 
 class DecisionTreeDetector:
     """
@@ -272,10 +289,10 @@ class DecisionTreeDetector:
 
     def __init__(
         self,
-        max_depth: int | None = 8,
+        max_depth: Optional[int] = 8,
         min_samples_leaf: int = 50,
         random_state: int = 42,
-        class_weight: str | None = "balanced",
+        class_weight: Optional[str] = "balanced",
     ) -> None:
         self.model = DecisionTreeClassifier(
             max_depth=max_depth,
@@ -284,25 +301,28 @@ class DecisionTreeDetector:
             class_weight=class_weight,
         )
 
-    def fit(self, X, y):
+    def fit(self, X, y) -> "DecisionTreeDetector":
         """Train supervised decision tree."""
         self.model.fit(X, y)
         return self
 
     def predict_scores(self, X) -> np.ndarray:
         """
-        Return anomaly / risk scores as P(y=1 | x).
+        Return risk scores as P(y=1 | x).
+
+        Handles the rare case where only one class is present in training.
         """
         proba = self.model.predict_proba(X)
-        # column 1 is probability of positive class
-        return proba[:, 1]
+        if proba.shape[1] == 2:
+            return proba[:, 1]
+        return proba[:, 0]
 
 
 class RandomForestDetector:
     """
     Supervised Random Forest baseline.
 
-    Interface matches other detectors:
+    Interface:
         - fit(X, y)
         - predict_scores(X) -> probability of positive class (y=1)
     """
@@ -310,10 +330,10 @@ class RandomForestDetector:
     def __init__(
         self,
         n_estimators: int = 300,
-        max_depth: int | None = None,
+        max_depth: Optional[int] = None,
         min_samples_leaf: int = 50,
         random_state: int = 42,
-        class_weight: str | None = "balanced_subsample",
+        class_weight: Optional[str] = "balanced_subsample",
         n_jobs: int = -1,
     ) -> None:
         self.model = RandomForestClassifier(
@@ -325,23 +345,25 @@ class RandomForestDetector:
             n_jobs=n_jobs,
         )
 
-    def fit(self, X, y):
+    def fit(self, X, y) -> "RandomForestDetector":
         """Train supervised random forest."""
         self.model.fit(X, y)
         return self
 
     def predict_scores(self, X) -> np.ndarray:
         """
-        Return anomaly / risk scores as P(y=1 | x).
+        Return risk scores as P(y=1 | x).
         """
         proba = self.model.predict_proba(X)
-        return proba[:, 1]
-
+        if proba.shape[1] == 2:
+            return proba[:, 1]
+        return proba[:, 0]
 
 
 # =============================================================================
-# "Specification-compliant" aliases (in case other code uses them)
+# Spec-compliant helper aliases (kept for backwards compatibility)
 # =============================================================================
+
 
 def fit_isolation_forest(
     X_train: np.ndarray,
@@ -349,109 +371,17 @@ def fit_isolation_forest(
     random_state: int = 42,
 ) -> IsolationForest:
     """
-    Train Isolation Forest model.
-    Alias for train_isolation_forest() - specification-compliant name.
+    Specification-compliant alias for train_isolation_forest().
     """
-    return train_isolation_forest(X_train, contamination, random_state)
+    return train_isolation_forest(
+        X_train,
+        contamination=contamination,
+        random_state=random_state,
+    )
 
 
 def score_isolation_forest(model: IsolationForest, X: np.ndarray) -> np.ndarray:
     """
-    Get anomaly scores from Isolation Forest.
-    Alias for get_if_anomaly_scores() - specification-compliant name.
+    Specification-compliant alias for get_if_anomaly_scores().
     """
     return get_if_anomaly_scores(model, X)
-
-
-# -------------------------------------------------------------------
-# Supervised baselines: Decision Tree & Random Forest
-# -------------------------------------------------------------------
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier
-import numpy as np
-
-
-class DecisionTreeDetector:
-    """
-    ساده‌ترین supervised baseline:
-    یک DecisionTreeClassifier که خروجی‌اش احتمال y=1 است.
-    """
-
-    def __init__(
-        self,
-        max_depth: int = 8,
-        min_samples_leaf: int = 50,
-        random_state: int = 42,
-        class_weight="balanced",
-    ):
-        self.model = DecisionTreeClassifier(
-            max_depth=max_depth,
-            min_samples_leaf=min_samples_leaf,
-            random_state=random_state,
-            class_weight=class_weight,
-        )
-
-    def fit(self, X, y):
-        """
-        X: array-like, shape (n_samples, n_features)
-        y: array-like, shape (n_samples,)
-        """
-        self.model.fit(X, y)
-        return self
-
-    def predict_scores(self, X) -> np.ndarray:
-        """
-        برمی‌گردونه probability کلاس مثبت (y=1)
-        """
-        proba = self.model.predict_proba(X)
-        # معمولاً ستون دوم احتمال y=1 است
-        if proba.shape[1] == 2:
-            return proba[:, 1]
-        # اگر به هر دلیلی فقط یک کلاس دیده شده باشد، همون ستون اول را برمی‌گردونیم
-        return proba[:, 0]
-
-    def predict_labels(self, X, threshold: float = 0.5) -> np.ndarray:
-        """
-        بر اساس threshold روی probability، label باینری می‌دهد.
-        """
-        scores = self.predict_scores(X)
-        return (scores >= threshold).astype(int)
-
-
-class RandomForestDetector:
-    """
-    RandomForestClassifier به عنوان supervised baseline قوی‌تر.
-    """
-
-    def __init__(
-        self,
-        n_estimators: int = 300,
-        max_depth=None,
-        min_samples_leaf: int = 50,
-        random_state: int = 42,
-        class_weight="balanced_subsample",
-        n_jobs: int = -1,
-    ):
-        self.model = RandomForestClassifier(
-            n_estimators=n_estimators,
-            max_depth=max_depth,
-            min_samples_leaf=min_samples_leaf,
-            random_state=random_state,
-            class_weight=class_weight,
-            n_jobs=n_jobs,
-        )
-
-    def fit(self, X, y):
-        self.model.fit(X, y)
-        return self
-
-    def predict_scores(self, X) -> np.ndarray:
-        proba = self.model.predict_proba(X)
-        if proba.shape[1] == 2:
-            return proba[:, 1]
-        return proba[:, 0]
-
-    def predict_labels(self, X, threshold: float = 0.5) -> np.ndarray:
-        scores = self.predict_scores(X)
-        return (scores >= threshold).astype(int)
-

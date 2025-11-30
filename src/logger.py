@@ -1,7 +1,9 @@
 # src/logger.py
-from pathlib import Path
+from __future__ import annotations
+
 import logging
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Optional
 
 
@@ -11,7 +13,11 @@ def get_logger(
     level: str = "INFO",
 ) -> logging.Logger:
     """
-    Simple project-wide logger factory.
+    Create or retrieve a project-wide logger.
+
+    This factory configures:
+    - Console logging
+    - Rotating file logging under ``results/logs/`` by default
 
     Parameters
     ----------
@@ -19,9 +25,9 @@ def get_logger(
         Logger name (usually module or script name).
     log_dir : Path, optional
         Directory to store log files. If None, defaults to:
-            <project_root>/results/logs
+        ``<project_root>/results/logs``.
     level : str
-        Logging level as string, e.g. "INFO", "DEBUG", "WARNING".
+        Logging level name, e.g. ``"INFO"``, ``"DEBUG"``, ``"WARNING"``.
 
     Returns
     -------
@@ -30,45 +36,45 @@ def get_logger(
     """
     logger = logging.getLogger(name)
 
-    # اگر قبلاً کانفیگ شده، همونو برگردون
+    # If logger already has handlers, assume it is configured
     if logger.handlers:
         return logger
 
-    # تعیین log_dir
+    # Resolve default log directory if none is provided
     if log_dir is None:
-        base_dir = Path(__file__).resolve().parent.parent  # پروژه
-        log_dir = base_dir / "results" / "logs"
+        project_root = Path(__file__).resolve().parent.parent
+        log_dir = project_root / "results" / "logs"
 
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / f"{name}.log"
 
-    # سطح لاگ
-    lvl = getattr(logging, level.upper(), logging.INFO)
-    logger.setLevel(lvl)
+    # Resolve log level
+    log_level = getattr(logging, level.upper(), logging.INFO)
+    logger.setLevel(log_level)
 
-    # formatter مشترک
     formatter = logging.Formatter(
         fmt="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    # console handler
-    ch = logging.StreamHandler()
-    ch.setLevel(lvl)
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
 
-    # file handler (rotating)
-    fh = RotatingFileHandler(
+    # Rotating file handler
+    file_handler = RotatingFileHandler(
         log_file,
-        maxBytes=5_000_000,   # ~5MB
+        maxBytes=5_000_000,  # ~5 MB
         backupCount=3,
         encoding="utf-8",
     )
-    fh.setLevel(lvl)
-    fh.setFormatter(formatter)
-    logger.addHandler(fh)
+    file_handler.setLevel(log_level)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
 
+    # Do not propagate to root logger to avoid duplicate logs
     logger.propagate = False
     logger.debug("Logger initialized.")
     return logger
