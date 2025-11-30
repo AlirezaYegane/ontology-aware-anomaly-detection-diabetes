@@ -1,12 +1,19 @@
-# Python
+############################
+# Python / Virtual Envs
+############################
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+
 env/
 venv/
 ENV/
+.venv/
+env*/
+.venv*/
+
 build/
 develop-eggs/
 dist/
@@ -23,29 +30,68 @@ wheels/
 .installed.cfg
 *.egg
 
-# Jupyter Notebook
-.ipynb_checkpoints
+############################
+# Jupyter Notebooks
+############################
+.ipynb_checkpoints/
 */.ipynb_checkpoints/*
 
-# Data files (add your specific data files here)
-data/raw/*.csv
-data/raw/*.xlsx
-data/processed/*.pkl
+############################
+# Tests / Coverage
+############################
+.pytest_cache/
+.pytest_cache.zip
+.coverage
+htmlcov/
 
-# Models
-results/models/*.pkl
-results/models/*.joblib
+############################
+# Data files
+############################
+# Ignore all raw / processed data, keep only README docs
+data/raw/*
+!data/raw/README.md
 
-# IDE
+data/processed/*
+!data/processed/README.md
+
+# (در صورت نیاز می‌تونی این دو خط رو برداری که بعضی فایل‌های سبک نگه داشته بشن)
+# data/raw/*.csv
+# data/processed/*.pkl
+
+############################
+# Results / Models / Logs
+############################
+# Figures and heavy artifacts
+results/figures/*
+results/models/*
+results/logs/*
+
+# Metrics & reports: نگه‌نداشتن فایل‌های سنگین، فقط Markdown بماند
+results/reports/*.json
+results/reports/*.csv
+# اگر حتی Markdownها هم باید قابل بازتولید باشند، این خط را هم اضافه کن:
+# results/reports/*.md
+
+# Generic log files
+*.log
+
+############################
+# IDE / Editor
+############################
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS
+############################
+# OS junk
+############################
 .DS_Store
 Thumbs.db
 
+############################
 # Environment variables
+############################
 .env
+.env.*
