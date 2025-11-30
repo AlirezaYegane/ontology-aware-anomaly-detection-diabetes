@@ -1,11 +1,12 @@
 # Environment Troubleshooting Guide
 
-## 🎯 Quick Diagnostic
+## 1. Quick Diagnostic
 
-Run this diagnostic script to identify your environment issue:
+Run this diagnostic script to identify common environment issues on Windows:
 
 ```powershell
-# Save this as diagnose.ps1 and run: powershell -ExecutionPolicy Bypass -File diagnose.ps1
+# Save as diagnose.ps1 and run:
+#   powershell -ExecutionPolicy Bypass -File diagnose.ps1
 
 Write-Host "====================================" -ForegroundColor Cyan
 Write-Host "Environment Diagnostic Tool" -ForegroundColor Cyan
@@ -79,449 +80,337 @@ Write-Host "Diagnostic Complete" -ForegroundColor Cyan
 Write-Host "====================================" -ForegroundColor Cyan
 ```
 
-**Quick one-liner diagnostic**:
+Quick one-liner diagnostic:
+
 ```powershell
-python --version; python -m pip --version; python -c "import pandas, numpy, sklearn, torch, matplotlib, seaborn; print('All packages OK')"; Test-Path "data\raw\diabetic_data.csv"
+python --version;
+python -m pip --version;
+python -c "import pandas, numpy, sklearn, torch, matplotlib, seaborn; print('All packages OK')";
+Test-Path "data\raw\diabetic_data.csv"
 ```
 
----
+## 2. Common Issues and Solutions
 
-## 🐛 Common Issues & Solutions
+### Issue 1: “Could not find platform independent libraries <prefix>”
+**Symptom**
 
-### Issue 1: "Could not find platform independent libraries <prefix>"
-
-**Symptoms**:
-```
+```text
 Could not find platform independent libraries <prefix>
 Consider setting $PYTHONHOME to <prefix>[:<exec_prefix>]
-Python path configuration:
-  PYTHONHOME = (not set)
-  ...
+...
 ```
 
-**Diagnosis**: Python installation is corrupted (common with Python 3.14 on Windows)
+**Cause**
+Corrupted or partially installed Python (very common with a broken global installation).
 
-**Solution**: DO NOT attempt to repair. Create a clean environment:
+**Fix (recommended)**
+Do not repair the broken Python. Create a clean Conda environment:
 
 ```powershell
-# Recommended: Use Miniconda
-# Follow LOCAL_WINDOWS_SETUP.md → "Step-by-Step Installation"
+# Install Miniconda first (see LOCAL_WINDOWS_SETUP.md)
 
-# Quick fix:
-# 1. Install Miniconda
-# 2. conda create -n anomaly python=3.11 -y
-# 3. conda activate anomaly
-# 4. pip install -r requirements.txt
+conda create -n anomaly python=3.11 -y
+conda activate anomaly
+pip install -r requirements.txt
 ```
 
----
+### Issue 2: “No module named pip”
+**Symptom**
 
-### Issue 2: "No module named pip"
-
-**Symptoms**:
-```
+```text
 python -m pip
 No module named pip
 ```
 
-**Diagnosis**: pip not installed (broken Python installation)
+**Cause**
+System Python is incomplete or broken.
 
-**Solution A** (if using standalone Python):
+**Fix A (standalone Python)**
+
 ```powershell
-# Try to bootstrap pip
 python -m ensurepip --upgrade
 
-# If that fails, download get-pip.py
 Invoke-WebRequest -Uri https://bootstrap.pypa.io/get-pip.py -OutFile get-pip.py
 python get-pip.py
 
-# Verify
 python -m pip --version
 ```
 
-**Solution B** (recommended - switch to conda):
+**Fix B (recommended: Conda)**
+
 ```powershell
-# Conda includes pip by default
 conda create -n anomaly python=3.11 -y
 conda activate anomaly
-python -m pip --version  # Should work immediately
+python -m pip --version
 ```
 
----
+### Issue 3: “ModuleNotFoundError: No module named 'X'”
+**Symptom**
 
-### Issue 3: "ModuleNotFoundError: No module named 'X'"
-
-**Symptoms**:
-```
-python run_pipeline_direct.py
+```text
 ModuleNotFoundError: No module named 'pandas'
 ```
 
-**Diagnosis**: Packages not installed OR wrong Python environment
+**Cause**
+Dependencies not installed, or the wrong Python interpreter is being used.
 
-**Solution**:
+**Fix**
 
 ```powershell
-# Step 1: Verify which Python you're using
+# 1. Verify which Python is used
 where python
-# Should show path to your conda environment, e.g.:
-# C:\Users\Asus\miniconda3\envs\anomaly\python.exe
 
-# Step 2: If wrong Python, activate environment
+# 2. Activate the project environment
 conda activate anomaly
 
-# Step 3: Install dependencies
+# 3. Install dependencies
 pip install -r requirements.txt
 
-# Step 4: Verify imports
+# 4. Verify imports
 python -c "import pandas, numpy, sklearn, torch, matplotlib, seaborn; print('Success!')"
 ```
 
-**Common variations**:
-- `No module named 'sklearn'` → Install: `pip install scikit-learn`
-- `No module named 'torch'` → Install: `pip install torch`
-- `No module named 'src'` → Wrong working directory, run: `cd "path\to\project\root"`
-
----
-
-### Issue 4: Package Version Conflicts
-
-**Symptoms**:
-```
-ERROR: pip's dependency resolver does not currently take into account all the packages that are installed.
-This behaviour is the source of the following dependency conflicts.
-```
-
-**Diagnosis**: Version conflicts between packages
-
-**Solution**:
+If a single package is missing:
 
 ```powershell
-# Option 1: Force reinstall with --upgrade
+pip install pandas        # or scikit-learn, torch, ...
+```
+
+If you see `No module named 'src'`, you are not in the project root. Run:
+
+```powershell
+cd "path\to\project\root"
+```
+
+### Issue 4: Package Version Conflicts
+**Symptom**
+
+```text
+ERROR: pip's dependency resolver does not currently take into account all the packages that are installed.
+```
+
+**Fix**
+
+```powershell
+# Option 1: Force reinstall
 pip install --upgrade --force-reinstall -r requirements.txt
 
-# Option 2: Create fresh environment (recommended)
+# Option 2: Fresh environment (recommended)
 conda deactivate
 conda env remove -n anomaly
 conda create -n anomaly python=3.11 -y
 conda activate anomaly
 pip install -r requirements.txt
-
-# Option 3: Update requirements.txt with specific versions
-# Edit requirements.txt to remove version constraints (>= instead of ==)
 ```
-
----
 
 ### Issue 5: PyTorch Installation Fails or DLL Errors
+**Symptoms**
 
-**Symptoms**:
+```text
+ImportError: DLL load failed while importing _C
 ```
-ImportError: DLL load failed while importing _C: The specified module could not be found.
-```
-OR
-```
+or
+```text
 ERROR: Could not find a version that satisfies the requirement torch>=2.0
 ```
 
-**Diagnosis**: 
-- Missing Visual C++ Redistributables (Windows)
-- OR incompatible Python version (3.13+)
+**Causes**
+- Missing Visual C++ redistributables on Windows.
+- Incompatible Python version.
 
-**Solution**:
+**Fix**
 
 ```powershell
-# Step 1: Install Visual C++ Redistributable
-# Download from: https://aka.ms/vs/17/release/vc_redist.x64.exe
-# Run and install
+# 1. Install Visual C++ Redistributable:
+#    https://aka.ms/vs/17/release/vc_redist.x64.exe
 
-# Step 2: Verify Python version
-python --version
-# Should be 3.8-3.12 (NOT 3.13+)
+# 2. Verify Python version
+python --version   # should be between 3.8 and 3.12
 
-# Step 3: Reinstall PyTorch
+# 3. Reinstall PyTorch
 pip uninstall torch torchvision torchaudio
 pip install torch torchvision torchaudio
 
-# Step 4: Test import
-python -c "import torch; print(f'PyTorch {torch.__version__} installed successfully')"
+# 4. Test
+python -c "import torch; print(torch.__version__)"
+```
 
-# If still fails: Use CPU-only version
+For CPU-only:
+
+```powershell
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 ```
 
----
+### Issue 6: Wrong Python Version
+**Symptom**
 
-### Issue 6: Wrong Python Version Used
-
-**Symptoms**:
-```
+```text
 python --version
 Python 3.14.0
 ```
-But you want to use Python 3.11 from conda environment
+but you expect the Conda environment version (for example 3.11).
 
-**Diagnosis**: conda environment not activated OR system Python in PATH before conda
-
-**Solution**:
+**Fix**
 
 ```powershell
-# Step 1: Activate conda environment
 conda activate anomaly
-
-# Step 2: Verify Python
-python --version  # Should now show 3.11.x
-
-# Step 3: Check which Python is being used
+python --version
 where python
-# First result should be conda environment, e.g.:
-# C:\Users\Asus\miniconda3\envs\anomaly\python.exe
-# If C:\Python314\python.exe appears first, conda environment failed to activate
-
-# Step 4: If activation fails, initialize conda for PowerShell
-conda init powershell
-# Close and reopen PowerShell, then retry
-conda activate anomaly
 ```
 
----
-
-### Issue 7: Jupyter Notebook Kernel Issues
-
-**Symptoms**:
-- Notebooks can't find installed packages
-- "No module named 'pandas'" in Jupyter but works in terminal
-
-**Diagnosis**: Jupyter using wrong Python kernel
-
-**Solution**:
+If activation does not work:
 
 ```powershell
-# Step 1: Activate your conda environment
+conda init powershell
+# Close and reopen PowerShell, then:
 conda activate anomaly
-
-# Step 2: Install Jupyter in the environment
-pip install jupyter ipykernel
-
-# Step 3: Register kernel
-python -m ipykernel install --user --name anomaly --display-name "Python (anomaly)"
-
-# Step 4: Launch Jupyter
-jupyter notebook
-
-# Step 5: In notebook, select kernel:
-# Kernel → Change kernel → Python (anomaly)
-
-# Step 6: Verify
-# Run in notebook cell:
-# import sys
-# print(sys.executable)
-# Should show path to your conda environment
 ```
 
----
+### Issue 7: Jupyter Notebook Kernel Uses Wrong Python
+**Symptoms**
+- Packages import correctly in terminal but not in notebooks.
+- `ModuleNotFoundError` inside Jupyter.
+
+**Fix**
+
+```powershell
+conda activate anomaly
+pip install jupyter ipykernel
+python -m ipykernel install --user --name anomaly --display-name "Python (anomaly)"
+jupyter notebook
+```
+
+In Jupyter:
+Kernel → Change kernel → Python (anomaly), then in a cell:
+
+```python
+import sys
+print(sys.executable)
+```
+Path should point to the anomaly environment.
 
 ### Issue 8: Data File Not Found
+**Symptom**
 
-**Symptoms**:
-```
+```text
 FileNotFoundError: [Errno 2] No such file or directory: 'data/raw/diabetic_data.csv'
 ```
 
-**Diagnosis**: 
-- Data file not downloaded
-- OR wrong working directory
-- OR incorrect file path
-
-**Solution**:
+**Fix**
 
 ```powershell
-# Step 1: Verify current directory
+# 1. Check current directory
 pwd
-# Should end with: ...\Ontology-aware Anomaly Detection Toy Pipeline
 
-# Step 2: Check if data directory exists
-Test-Path "data\raw"
-# If False, create it:
+# 2. Ensure data directory exists
+Test-Path "data\raw"             # if False:
 New-Item -ItemType Directory -Path "data\raw" -Force
 
-# Step 3: Check if data file exists
+# 3. Check file
 Test-Path "data\raw\diabetic_data.csv"
-# If False, you need to download it
 
-# Step 4: Download data (if needed)
-# Option A: Download from UCI repository
-# Visit: https://archive.ics.uci.edu/ml/datasets/Diabetes+130-US+hospitals+for+years+1999-2008
-# Download diabetic_data.csv
+# 4. If missing, download from the UCI repository and place it there.
+```
 
-# Option B: If you have it elsewhere, copy it
-# Copy-Item "C:\path\to\diabetic_data.csv" -Destination "data\raw\"
+Optionally check file size:
 
-# Step 5: Verify file size (should be ~10-20 MB)
+```powershell
 (Get-Item "data\raw\diabetic_data.csv").Length / 1MB
 ```
 
----
+### Issue 9: Permission Denied When Writing Results
+**Symptom**
 
-### Issue 9: Permission Denied Errors
-
-**Symptoms**:
-```
+```text
 PermissionError: [Errno 13] Permission denied: 'results/figures/plot.png'
 ```
 
-**Diagnosis**: 
-- File is open in another program
-- OR insufficient permissions
-- OR directory doesn't exist
-
-**Solution**:
+**Fix**
 
 ```powershell
-# Step 1: Close any programs viewing the files (image viewers, Excel, etc.)
+# 1. Close viewers (image preview, Excel, etc.)
 
-# Step 2: Ensure results directories exist
+# 2. Ensure directories exist
 New-Item -ItemType Directory -Path "results\figures" -Force
 New-Item -ItemType Directory -Path "results\models" -Force
 New-Item -ItemType Directory -Path "results\reports" -Force
 
-# Step 3: Check permissions
-icacls "results\"
-# You should have (F) Full control
-
-# Step 4: If permission issues, run PowerShell as Administrator
-# Right-click PowerShell → Run as Administrator
-# Navigate to project and try again
-
-# Step 5: Delete locked files (if safe to do so)
-Remove-Item "results\figures\*" -Force
-# Then rerun pipeline
+# 3. If needed, run PowerShell as Administrator
 ```
 
----
+### Issue 10: conda Command Not Found
+**Symptom**
 
-### Issue 10: Conda Command Not Found
-
-**Symptoms**:
-```
+```text
 conda : The term 'conda' is not recognized...
 ```
 
-**Diagnosis**: 
-- Miniconda not installed
-- OR not in PATH
-- OR PowerShell needs refresh
-
-**Solution**:
+**Fix**
 
 ```powershell
-# Step 1: Check if Miniconda is installed
+# 1. Check if Miniconda exists
 Test-Path "$env:USERPROFILE\miniconda3"
-# OR
-Test-Path "C:\ProgramData\Miniconda3"
 
-# Step 2: If installed but not in PATH, manually add
-# Find conda location
-Get-ChildItem -Path C:\ -Filter "conda.exe" -Recurse -ErrorAction SilentlyContinue
-
-# Step 3: If not installed, install Miniconda
-# Download from: https://docs.conda.io/en/latest/miniconda.html
-# Run installer, check "Add to PATH"
-
-# Step 4: If installed, initialize PowerShell
+# 2. Initialize for PowerShell
 & "$env:USERPROFILE\miniconda3\Scripts\conda.exe" init powershell
-# Close and reopen PowerShell
 
-# Step 5: Verify
+# 3. Close and reopen PowerShell
 conda --version
 ```
 
----
+If Miniconda is not installed, reinstall it and enable “Add to PATH” during installation.
 
-### Issue 11: Script Execution Policy Error (PowerShell)
+### Issue 11: PowerShell Script Execution Policy
+**Symptom**
 
-**Symptoms**:
+```text
+File ...\activate.ps1 cannot be loaded because running scripts is disabled on this system.
 ```
-.\activate : File ...\activate.ps1 cannot be loaded because running scripts is disabled on this system.
-```
 
-**Diagnosis**: PowerShell execution policy blocking conda activation
-
-**Solution**:
+**Fix**
 
 ```powershell
-# Option 1: Bypass for current session
+# Current session only
 Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
 
-# Option 2: Set for current user (permanent)
+# Or for current user (persistent)
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-
-# Option 3: Use Command Prompt instead of PowerShell
-# Open cmd.exe and use:
-conda activate anomaly
-
-# Option 4: Use Anaconda Prompt
-# Search for "Anaconda Prompt" in Windows Start menu
 ```
+Alternatively, use cmd.exe or the Anaconda Prompt.
 
----
+## 3. Quick Reference Table
 
-## 🔍 Environment Comparison Table
+| Symptom | Likely Cause | Recommended Fix |
+| :--- | :--- | :--- |
+| “Could not find platform independent libraries” | Broken Python | Use Miniconda and a clean environment |
+| “No module named pip” | Broken Python | Ensurepip or switch to Conda |
+| “No module named 'pandas'” | Packages missing | `pip install -r requirements.txt` |
+| PyTorch DLL errors | Missing VC++ / Python | Install VC++ and reinstall PyTorch |
+| `conda` not recognized | PATH / init issue | `conda init powershell` |
+| Wrong Python version | Env not activated | `conda activate anomaly` |
+| Data file missing | File not in `data/` | Place CSV under `data/raw/` |
+| Notebook cannot import modules | Wrong kernel | Register and select Conda kernel |
 
-| Symptom | Likely Cause | Recommended Solution | Quick Fix |
-|---------|--------------|----------------------|-----------|
-| `Could not find platform independent libraries` | Broken Python | Use Miniconda | See Issue 1 |
-| `No module named pip` | Broken Python | Use Miniconda | `python -m ensurepip` |
-| `No module named 'pandas'` | Packages not installed | `pip install -r requirements.txt` | `pip install pandas` |
-| `DLL load failed` (PyTorch) | Missing Visual C++ | Install VC++ Redistributable | Use CPU PyTorch |
-| `conda not found` | Not in PATH | `conda init powershell` | Use Anaconda Prompt |
-| Wrong Python version | Environment not activated | `conda activate anomaly` | Check `where python` |
-| Data file not found | File missing | Download or move file | Check with `Test-Path` |
-| Jupyter kernel issues | Wrong kernel | Install ipykernel in env | Change kernel in notebook |
-
----
-
-## 🚑 Emergency Recovery
-
-If everything fails and you want to start completely fresh:
+## 4. Full Reset (Emergency Recovery)
+If the environment is badly broken and you want a clean start:
 
 ```powershell
-# Step 1: Backup any important files
+# 1. Backup results (optional)
 Copy-Item "results\" -Destination "C:\Backup\results_backup\" -Recurse -Force
 
-# Step 2: Remove all conda environments
+# 2. Remove old environment
 conda env remove -n anomaly
-# Repeat for any other environments you created
 
-# Step 3: Reinstall Miniconda (optional - only if conda is broken)
-# Uninstall Miniconda from Windows Settings → Apps
-# Download fresh installer from https://docs.conda.io/en/latest/miniconda.html
+# 3. (Optional) Reinstall Miniconda if Conda itself is broken
 
-# Step 4: Create new environment from scratch
+# 4. Recreate environment
 conda create -n anomaly python=3.11 -y
 conda activate anomaly
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# Step 5: Verify
-python -c "import pandas, numpy, sklearn, torch, matplotlib, seaborn; print('✅ Environment rebuilt successfully!')"
+# 5. Verify
+python -c "import pandas, numpy, sklearn, torch, matplotlib, seaborn; print('Environment rebuilt successfully.')"
 ```
 
----
-
-## 📞 Still Stuck?
-
-If none of these solutions work:
-
-1. **Run the diagnostic script** at the top of this document
-2. **Capture the full error message** (copy entire traceback)
-3. **Note your environment**:
-   - Windows version: `systeminfo | findstr /B /C:"OS Name" /C:"OS Version"`
-   - Python version: `python --version`
-   - Conda version (if installed): `conda --version`
-4. **Alternative**: Use Google Colab (see `GOOGLE_COLAB_SETUP.md`) - requires zero local setup
-
-**Common last resorts**:
-- Switch to Google Colab (fastest)
-- Use Windows Subsystem for Linux (WSL2) with conda
-- Use Docker container (advanced)
+If environment problems persist on Windows, you can also run the project in Google Colab or inside a Linux environment (WSL2 or Docker).
